@@ -1,5 +1,7 @@
 package com.example
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -67,6 +69,23 @@ fun MainAppShell(viewModel: BarberViewModel) {
     val city by viewModel.selectedCity.collectAsState()
     val isDetectingGps by viewModel.isDetectingLocation.collectAsState()
     val filterCriteria by viewModel.filterCriteria.collectAsState()
+
+    // Smart Recovery & Reminder States
+    val selectedOffer by viewModel.selectedOffer.collectAsState()
+    val showOfferModal by viewModel.showOfferDetailsModal.collectAsState()
+    val isBookingOffer by viewModel.isBookingOffer.collectAsState()
+    val offerError by viewModel.offerBookingError.collectAsState()
+    val offerSuccess by viewModel.offerBookingSuccess.collectAsState()
+    val simulateConflict by viewModel.simulateOfferConflict.collectAsState()
+
+    val selectedReminderBooking by viewModel.selectedReminderBooking.collectAsState()
+    val showReminderModal by viewModel.showReminderDetailsModal.collectAsState()
+    val showRecoveryConsole by viewModel.showSmartRecoveryConsole.collectAsState()
+    val noShowBooking by viewModel.noShowModalBooking.collectAsState()
+
+    // Real-Time Queue Modal State
+    val selectedQueueBooking by viewModel.selectedQueueBooking.collectAsState()
+    val showLiveQueueModal by viewModel.showLiveQueueModal.collectAsState()
 
     val context = LocalContext.current
 
@@ -268,7 +287,7 @@ fun MainAppShell(viewModel: BarberViewModel) {
                 booking = booking,
                 onConfirmCancel = {
                     viewModel.cancelActiveBooking(booking.id)
-                    Toast.makeText(context, "Appointment cancelled & refund initiated.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "Appointment cancelled. Slot recovered & offered to nearby customers!", Toast.LENGTH_LONG).show()
                 },
                 onDismiss = { viewModel.cancelModalBooking.value = null }
             )
@@ -302,6 +321,91 @@ fun MainAppShell(viewModel: BarberViewModel) {
             DirectionsDialog(
                 shop = shop,
                 onDismiss = { viewModel.showDirectionsShop.value = null }
+            )
+        }
+
+        // =========================================================================
+        // SMART RECOVERY & APPOINTMENT REMINDER OVERLAYS
+        // =========================================================================
+
+        if (showOfferModal && selectedOffer != null) {
+            FlashOfferModal(
+                offer = selectedOffer!!,
+                isBooking = isBookingOffer,
+                error = offerError,
+                success = offerSuccess,
+                simulateConflict = simulateConflict,
+                onToggleConflict = {
+                    viewModel.simulateOfferConflict.value = !viewModel.simulateOfferConflict.value
+                },
+                onConfirmBooking = {
+                    viewModel.bookRecoveredOffer(selectedOffer!!)
+                },
+                onDismiss = {
+                    viewModel.showOfferDetailsModal.value = false
+                    viewModel.offerBookingError.value = null
+                    viewModel.offerBookingSuccess.value = null
+                }
+            )
+        }
+
+        if (showReminderModal && selectedReminderBooking != null) {
+            val booking = selectedReminderBooking!!
+            AppointmentReminderModal(
+                booking = booking,
+                onGetDirections = {
+                    viewModel.showReminderDetailsModal.value = false
+                    val gmmIntentUri = Uri.parse("geo:0,0?q=${Uri.encode(booking.shopName + " " + booking.shopAddress)}")
+                    val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri)
+                    mapIntent.setPackage("com.google.android.apps.maps")
+                    try {
+                        context.startActivity(mapIntent)
+                    } catch (e: Exception) {
+                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps/search/?api=1&query=${Uri.encode(booking.shopName + " " + booking.shopAddress)}"))
+                        context.startActivity(browserIntent)
+                    }
+                },
+                onViewBooking = {
+                    viewModel.showReminderDetailsModal.value = false
+                    viewModel.currentScreen.value = null
+                    viewModel.currentTab.value = 2 // Switch to Bookings Tab
+                },
+                onDismiss = {
+                    viewModel.showReminderDetailsModal.value = false
+                }
+            )
+        }
+
+        if (showRecoveryConsole) {
+            SmartRecoveryEngineConsoleModal(
+                viewModel = viewModel,
+                onDismiss = {
+                    viewModel.showSmartRecoveryConsole.value = false
+                }
+            )
+        }
+
+        noShowBooking?.let { booking ->
+            NoShowConfirmDialog(
+                booking = booking,
+                onConfirm = {
+                    viewModel.markCustomerNoShow(booking.id)
+                    Toast.makeText(context, "Marked as NO_SHOW. Cancelled Slot Recovery pipeline triggered!", Toast.LENGTH_LONG).show()
+                },
+                onDismiss = {
+                    viewModel.noShowModalBooking.value = null
+                }
+            )
+        }
+
+        // Real-Time Barber Queue Modal
+        if (showLiveQueueModal && selectedQueueBooking != null) {
+            RealtimeQueueModalDialog(
+                booking = selectedQueueBooking!!,
+                viewModel = viewModel,
+                onDismiss = {
+                    viewModel.showLiveQueueModal.value = false
+                }
             )
         }
     }

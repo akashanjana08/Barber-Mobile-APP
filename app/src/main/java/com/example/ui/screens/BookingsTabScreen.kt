@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.*
 import com.example.ui.BarberViewModel
+import com.example.ui.components.RealtimeQueueWaitingCard
 import com.example.ui.theme.*
 
 @Composable
@@ -46,17 +47,42 @@ fun BookingsTabScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 16.dp)
         ) {
-            Text(
-                text = "My Appointments",
-                style = MaterialTheme.typography.headlineSmall.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
-            )
-            Text(
-                text = "Manage upcoming sessions, rescheduling, and past invoices",
-                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "My Appointments",
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                    )
+                    Text(
+                        text = "Smart reminders, cancelled slot recovery & bookings",
+                        style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+                    )
+                }
+
+                Surface(
+                    onClick = { viewModel.showSmartRecoveryConsole.value = true },
+                    shape = RoundedCornerShape(12.dp),
+                    color = SurfaceElevated,
+                    border = BorderStroke(1.dp, AmberGold.copy(alpha = 0.5f)),
+                    modifier = Modifier.testTag("btn_bookings_smart_engine")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = AmberGold, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Engine", color = AmberGold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -186,6 +212,7 @@ fun BookingsTabScreen(
                                         BookingStatus.UPCOMING -> EmeraldGreenBg
                                         BookingStatus.COMPLETED -> AmberGlow
                                         BookingStatus.CANCELLED -> CrimsonRedBg
+                                        BookingStatus.NO_SHOW -> CrimsonRedBg
                                     }
                                 ) {
                                     Text(
@@ -194,6 +221,7 @@ fun BookingsTabScreen(
                                             BookingStatus.UPCOMING -> EmeraldGreen
                                             BookingStatus.COMPLETED -> AmberGold
                                             BookingStatus.CANCELLED -> CrimsonRed
+                                            BookingStatus.NO_SHOW -> CrimsonRed
                                         },
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 11.sp,
@@ -205,6 +233,61 @@ fun BookingsTabScreen(
                             Spacer(modifier = Modifier.height(10.dp))
                             HorizontalDivider(color = BorderSubtle)
                             Spacer(modifier = Modifier.height(10.dp))
+
+                            // 15-Minute Arrival Reminder Status Pill
+                            if (booking.status == BookingStatus.UPCOMING) {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (booking.reminderSentAt != null) AmberGlow else SurfaceElevated,
+                                    border = BorderStroke(1.dp, if (booking.reminderSentAt != null) AmberGold.copy(alpha = 0.5f) else BorderSubtle),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            if (booking.reminderSentAt != null) {
+                                                viewModel.openReminderDetails(booking)
+                                            } else {
+                                                viewModel.trigger15MinuteReminder(booking.id)
+                                            }
+                                        }
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Default.Alarm,
+                                                contentDescription = null,
+                                                tint = if (booking.reminderSentAt != null) AmberGold else TextSecondary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = if (booking.reminderSentAt != null) "15-Min Arrival Reminder Sent" else "Schedule 15-Min Arrival Reminder",
+                                                color = if (booking.reminderSentAt != null) AmberGold else TextSecondary,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                        Text(
+                                            text = if (booking.reminderSentAt != null) "View ➔" else "Trigger ➔",
+                                            color = AmberGold,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // Real-Time Waiting Customer Count & Queue Status Card
+                                RealtimeQueueWaitingCard(
+                                    booking = booking,
+                                    viewModel = viewModel,
+                                    onViewLiveQueue = { viewModel.openLiveQueue(booking) }
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                            }
 
                             // Details
                             Text(
@@ -252,7 +335,18 @@ fun BookingsTabScreen(
                                 // Action Buttons depending on status
                                 when (booking.status) {
                                     BookingStatus.UPCOMING -> {
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            OutlinedButton(
+                                                onClick = {
+                                                    viewModel.noShowModalBooking.value = booking
+                                                },
+                                                shape = RoundedCornerShape(10.dp),
+                                                border = BorderStroke(1.dp, TextTertiary.copy(alpha = 0.5f)),
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                            ) {
+                                                Text("No-Show", color = TextSecondary, fontSize = 11.sp)
+                                            }
+
                                             OutlinedButton(
                                                 onClick = {
                                                     viewModel.cancelModalBooking.value = booking
@@ -261,7 +355,7 @@ fun BookingsTabScreen(
                                                 border = BorderStroke(1.dp, CrimsonRed.copy(alpha = 0.6f)),
                                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                             ) {
-                                                Text("Cancel", color = CrimsonRed, fontSize = 12.sp)
+                                                Text("Cancel", color = CrimsonRed, fontSize = 11.sp)
                                             }
 
                                             Button(
@@ -270,9 +364,9 @@ fun BookingsTabScreen(
                                                 },
                                                 shape = RoundedCornerShape(10.dp),
                                                 colors = ButtonDefaults.buttonColors(containerColor = AmberGold, contentColor = ObsidianDark),
-                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                             ) {
-                                                Text("Reschedule", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                Text("Reschedule", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                             }
                                         }
                                     }
@@ -291,11 +385,34 @@ fun BookingsTabScreen(
                                         }
                                     }
                                     BookingStatus.CANCELLED -> {
-                                        Text(
-                                            text = "Refund completed",
-                                            color = TextTertiary,
-                                            fontSize = 12.sp
-                                        )
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            Text(
+                                                text = "Refund completed",
+                                                color = TextTertiary,
+                                                fontSize = 11.sp
+                                            )
+                                            Text(
+                                                text = "Slot recovered & offered",
+                                                color = EmeraldGreen,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                    BookingStatus.NO_SHOW -> {
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            Text(
+                                                text = "Marked No-Show by Shop",
+                                                color = CrimsonRed,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Text(
+                                                text = "Slot recovered for flash booking",
+                                                color = AmberGold,
+                                                fontSize = 10.sp
+                                            )
+                                        }
                                     }
                                 }
                             }

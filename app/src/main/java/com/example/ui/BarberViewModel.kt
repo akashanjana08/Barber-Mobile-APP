@@ -10,28 +10,47 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.UUID
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class BarberViewModel(private val repository: BarberRepository) : ViewModel() {
 
     init {
         viewModelScope.launch {
             repository.seedInitialDataIfEmpty()
+            refreshCandidates()
         }
     }
+
+    // =========================================================================
+    // REAL-TIME BARBER QUEUE & WAITING CUSTOMER COUNT STATE
+    // =========================================================================
+    val allQueueItems: StateFlow<List<BarberQueueItem>> = repository.getAllQueueFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val barberSummaries: StateFlow<Map<String, BarberQueueSummary>> = repository.getBarberQueueSummariesFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    val transportMode: StateFlow<RealtimeTransportMode> = repository.transportMode
+    val latestQueueEvent: StateFlow<RealtimeQueueEvent?> = repository.latestQueueEvent
+    val realtimeEventQueue = repository.realtimeEventQueue
+
+    val selectedQueueBooking = MutableStateFlow<Booking?>(null)
+    val showLiveQueueModal = MutableStateFlow(false)
+    val showQueueSimulatorSheet = MutableStateFlow(false)
 
     // Auth State
     val isLoggedIn = MutableStateFlow(true)
     val userProfile: StateFlow<User> = repository.getUserProfileFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), User("usr_101", "Akash Sharma", "akash.sharma@example.com", "+91 98765 12340"))
 
-    // Location State
+    // Location State & Privacy Controls (Section 61)
     val selectedCity = MutableStateFlow("Noida, Uttar Pradesh")
     val isDetectingLocation = MutableStateFlow(false)
-    val locationPermissionDenied = MutableStateFlow(false)
+    val locationPermissionGranted = MutableStateFlow(true)
     val showLocationPicker = MutableStateFlow(false)
 
     // Navigation / Tabs: 0: Home, 1: Explore, 2: Bookings, 3: Notifications, 4: Profile
     val currentTab = MutableStateFlow(0)
-    // Sub-screen navigation: null means tab root, or "SHOP_DETAIL", "BOOKING_STEP", "BOOKING_CONFIRMED"
+    // Sub-screen navigation: null means tab root, or "SHOP_DETAIL", "BOOKING_STEP"
     val currentScreen = MutableStateFlow<String?>(null)
 
     // Catalog & Filters
@@ -105,17 +124,58 @@ class BarberViewModel(private val repository: BarberRepository) : ViewModel() {
         list.filter { it.status == BookingStatus.UPCOMING }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // User's active position in the queue for their primary upcoming booking
+    val primaryQueuePosition: StateFlow<UserQueuePosition?> = upcomingBookings.flatMapLatest { list ->
+        val firstUpcoming = list.firstOrNull { it.status == BookingStatus.UPCOMING }
+        if (firstUpcoming != null) {
+            repository.getUserQueuePositionFlow(
+                bookingId = firstUpcoming.id,
+                barberName = firstUpcoming.barberName,
+                scheduledTime = firstUpcoming.timeSlot
+            )
+        } else {
+            flowOf(null)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
     val completedBookings = allBookings.map { list ->
         list.filter { it.status == BookingStatus.COMPLETED }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val cancelledBookings = allBookings.map { list ->
-        list.filter { it.status == BookingStatus.CANCELLED }
+        list.filter { it.status == BookingStatus.CANCELLED || it.status == BookingStatus.NO_SHOW }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Notifications
     val notifications: StateFlow<List<NotificationItem>> = repository.getNotificationsFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // =========================================================================
+    // SMART RECOVERY & CANCELLED SLOTS ENGINE STATE
+    // =========================================================================
+    val activeOffers: StateFlow<List<SlotOffer>> = repository.getActiveOffersFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allOffers: StateFlow<List<SlotOffer>> = repository.getOffersFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val selectedOffer = MutableStateFlow<SlotOffer?>(null)
+    val showOfferDetailsModal = MutableStateFlow(false)
+
+    val selectedReminderBooking = MutableStateFlow<Booking?>(null)
+    val showReminderDetailsModal = MutableStateFlow(false)
+
+    val showSmartRecoveryConsole = MutableStateFlow(false)
+    val targetCandidates = MutableStateFlow<List<TargetCustomer>>(emptyList())
+
+    val isSimulatingReminder = MutableStateFlow(false)
+    val isSimulatingRecovery = MutableStateFlow(false)
+    val isBookingOffer = MutableStateFlow(false)
+    val offerBookingError = MutableStateFlow<String?>(null)
+    val offerBookingSuccess = MutableStateFlow<Booking?>(null)
+    val simulateOfferConflict = MutableStateFlow(false) // HTTP 409 Concurrency test
+
+    val noShowModalBooking = MutableStateFlow<Booking?>(null)
 
     // Booking Flow State
     val selectedShop = MutableStateFlow<BarberShop?>(null)
@@ -169,7 +229,7 @@ class BarberViewModel(private val repository: BarberRepository) : ViewModel() {
     fun toggleServiceSelection(service: BarberService) {
         val current = selectedServices.value.toMutableList()
         if (current.any { it.id == service.id }) {
-            if (current.size > 1) { // keep at least one
+            if (current.size > 1) {
                 current.removeAll { it.id == service.id }
             }
         } else {
@@ -203,7 +263,6 @@ class BarberViewModel(private val repository: BarberRepository) : ViewModel() {
         }
     }
 
-    // Step progression & Slot Hold
     fun proceedToReview() {
         val shop = selectedShop.value ?: return
         val slot = selectedSlot.value ?: return
@@ -237,7 +296,6 @@ class BarberViewModel(private val repository: BarberRepository) : ViewModel() {
                 delay(1000)
                 holdCountdownSeconds.value -= 1
             }
-            // Expired!
             bookingConflictError.value = "Reservation hold expired. Please select a time slot again."
             slotReservation.value = null
         }
@@ -293,6 +351,7 @@ class BarberViewModel(private val repository: BarberRepository) : ViewModel() {
         viewModelScope.launch {
             repository.cancelBooking(bookingId)
             cancelModalBooking.value = null
+            refreshCandidates()
         }
     }
 
@@ -335,5 +394,200 @@ class BarberViewModel(private val repository: BarberRepository) : ViewModel() {
         currentScreen.value = null
         countdownJob?.cancel()
         bookingConflictError.value = null
+    }
+
+    // =========================================================================
+    // SMART RECOVERY & ARRIVAL REMINDER ACTIONS
+    // =========================================================================
+
+    fun trigger15MinuteReminder(bookingId: String? = null) {
+        viewModelScope.launch {
+            isSimulatingReminder.value = true
+            delay(500)
+            val reminded = repository.checkAndSendAppointmentReminders(bookingId)
+            isSimulatingReminder.value = false
+            if (reminded.isNotEmpty()) {
+                selectedReminderBooking.value = reminded.first()
+                showReminderDetailsModal.value = true
+            }
+        }
+    }
+
+    fun triggerCancellationRecovery(bookingId: String) {
+        viewModelScope.launch {
+            isSimulatingRecovery.value = true
+            delay(600)
+            val res = repository.triggerSlotRecovery(bookingId, OfferSourceType.CUSTOMER_CANCELLATION)
+            isSimulatingRecovery.value = false
+            res.onSuccess { offer ->
+                selectedOffer.value = offer
+                showOfferDetailsModal.value = true
+            }
+            refreshCandidates()
+        }
+    }
+
+    fun markCustomerNoShow(bookingId: String) {
+        viewModelScope.launch {
+            isSimulatingRecovery.value = true
+            repository.markBookingNoShow(bookingId)
+            isSimulatingRecovery.value = false
+            noShowModalBooking.value = null
+            refreshCandidates()
+        }
+    }
+
+    fun bookRecoveredOffer(offer: SlotOffer) {
+        viewModelScope.launch {
+            isBookingOffer.value = true
+            offerBookingError.value = null
+            offerBookingSuccess.value = null
+
+            val res = repository.claimSlotOffer(
+                offerId = offer.id,
+                userId = "usr_101",
+                simulateConflict = simulateOfferConflict.value
+            )
+            isBookingOffer.value = false
+
+            res.onSuccess { newBooking ->
+                offerBookingSuccess.value = newBooking
+                lastConfirmedBooking.value = newBooking
+            }.onFailure { err ->
+                offerBookingError.value = err.message
+            }
+        }
+    }
+
+    fun refreshCandidates() {
+        val list = repository.evaluateTargetCustomers()
+        // If current device location permission is toggled off, update current user candidate
+        targetCandidates.value = list.map { candidate ->
+            if (candidate.id == "usr_101") {
+                val perm = locationPermissionGranted.value
+                candidate.copy(
+                    locationPermissionGranted = perm,
+                    isEligible = perm && candidate.distanceKm <= 2.0 && candidate.lastActiveHoursAgo <= 48.0,
+                    ineligibilityReason = if (!perm) "Location permission disabled by user" else candidate.ineligibilityReason
+                )
+            } else {
+                candidate
+            }
+        }
+    }
+
+    fun toggleLocationPermission() {
+        locationPermissionGranted.value = !locationPermissionGranted.value
+        refreshCandidates()
+    }
+
+    fun openReminderDetails(booking: Booking) {
+        selectedReminderBooking.value = booking
+        showReminderDetailsModal.value = true
+    }
+
+    fun openReminderDetailsById(bookingId: String) {
+        viewModelScope.launch {
+            val booking = allBookings.value.find { it.id == bookingId }
+            if (booking != null) {
+                selectedReminderBooking.value = booking
+                showReminderDetailsModal.value = true
+            }
+        }
+    }
+
+    fun openOfferDetails(offer: SlotOffer) {
+        selectedOffer.value = offer
+        offerBookingError.value = null
+        offerBookingSuccess.value = null
+        showOfferDetailsModal.value = true
+    }
+
+    fun openOfferDetailsById(offerId: String) {
+        viewModelScope.launch {
+            val offer = allOffers.value.find { it.id == offerId }
+            if (offer != null) {
+                openOfferDetails(offer)
+            }
+        }
+    }
+
+    // =========================================================================
+    // REAL-TIME BARBER QUEUE ACTIONS & SIMULATION
+    // =========================================================================
+
+    fun openLiveQueue(booking: Booking) {
+        selectedQueueBooking.value = booking
+        showLiveQueueModal.value = true
+    }
+
+    fun getQueuePositionForBooking(booking: Booking): Flow<UserQueuePosition> {
+        return repository.getUserQueuePositionFlow(
+            bookingId = booking.id,
+            barberName = booking.barberName,
+            scheduledTime = booking.timeSlot
+        )
+    }
+
+    fun getBarberQueueFlow(barberName: String): Flow<List<BarberQueueItem>> {
+        return repository.getBarberQueueFlow(barberName)
+    }
+
+    fun startBarberService(queueItemId: String) {
+        viewModelScope.launch {
+            repository.startBarberService(queueItemId)
+        }
+    }
+
+    fun completeBarberService(queueItemId: String) {
+        viewModelScope.launch {
+            repository.completeBarberService(queueItemId)
+        }
+    }
+
+    fun checkInQueueCustomer(queueItemId: String) {
+        viewModelScope.launch {
+            repository.customerCheckInQueueItem(queueItemId)
+        }
+    }
+
+    fun cancelQueueCustomer(queueItemId: String) {
+        viewModelScope.launch {
+            repository.customerCancelQueueItem(queueItemId)
+        }
+    }
+
+    fun markQueueCustomerNoShow(queueItemId: String) {
+        viewModelScope.launch {
+            repository.markQueueItemNoShow(queueItemId)
+        }
+    }
+
+    fun broadcastBarberDelay(barberName: String, delayMins: Int = 10) {
+        viewModelScope.launch {
+            repository.broadcastBarberDelay(barberName, delayMins)
+        }
+    }
+
+    fun addWalkInAhead(barberName: String, customerName: String, service: String, durationMins: Int, timeSlot: String) {
+        viewModelScope.launch {
+            repository.addWalkInQueueCustomer(barberName, customerName, service, durationMins, timeSlot)
+        }
+    }
+
+    fun toggleTransportMode() {
+        val current = transportMode.value
+        val next = when (current) {
+            RealtimeTransportMode.WEBSOCKET -> RealtimeTransportMode.SSE
+            RealtimeTransportMode.SSE -> RealtimeTransportMode.POLLING
+            RealtimeTransportMode.POLLING -> RealtimeTransportMode.WEBSOCKET
+        }
+        repository.setTransportMode(next)
+    }
+
+    fun resetQueueBenchmark() {
+        viewModelScope.launch {
+            repository.resetQueueToDefault()
+        }
     }
 }

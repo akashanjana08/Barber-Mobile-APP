@@ -10,9 +10,13 @@ import androidx.room.RoomDatabase
         BookingEntity::class,
         FavoriteEntity::class,
         NotificationEntity::class,
-        UserProfileEntity::class
+        UserProfileEntity::class,
+        RecoveredSlotOfferEntity::class,
+        OfferDeliveryRecordEntity::class,
+        ReminderRecordEntity::class,
+        BarberQueueEntity::class
     ],
-    version = 1,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -20,6 +24,10 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun favoriteDao(): FavoriteDao
     abstract fun notificationDao(): NotificationDao
     abstract fun userProfileDao(): UserProfileDao
+    abstract fun offerDao(): OfferDao
+    abstract fun offerDeliveryRecordDao(): OfferDeliveryRecordDao
+    abstract fun reminderRecordDao(): ReminderRecordDao
+    abstract fun barberQueueDao(): BarberQueueDao
 
     companion object {
         @Volatile

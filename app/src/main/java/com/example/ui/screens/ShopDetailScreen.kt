@@ -40,6 +40,7 @@ fun ShopDetailScreen(
     val shop = viewModel.selectedShop.collectAsState().value ?: return
     val selectedServices by viewModel.selectedServices.collectAsState()
     val selectedBarber by viewModel.selectedBarber.collectAsState()
+    val barberSummaries by viewModel.barberSummaries.collectAsState()
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Services, 1: Barbers, 2: Reviews, 3: About
 
@@ -467,6 +468,34 @@ fun ShopDetailScreen(
                                         color = TextSecondary,
                                         fontSize = 12.sp
                                     )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    // Barber-specific waiting customer count
+                                    val bSummary = barberSummaries[barber.name]
+                                    val waitCount = bSummary?.activeWaitingCount ?: 0
+                                    val waitMins = bSummary?.estimatedWaitMinutes ?: 0
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = if (waitCount == 0) EmeraldGreenBg else AmberGlow
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(6.dp)
+                                                    .clip(CircleShape)
+                                                    .background(if (waitCount == 0) EmeraldGreen else AmberGold)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = if (waitCount == 0) "No queue • Available now" else "$waitCount waiting • ~$waitMins mins",
+                                                color = if (waitCount == 0) EmeraldGreen else AmberGold,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
                                 }
 
                                 Row(

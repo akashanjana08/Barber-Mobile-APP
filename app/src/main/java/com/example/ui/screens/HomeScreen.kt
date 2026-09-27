@@ -34,7 +34,9 @@ import com.example.data.model.*
 import com.example.ui.BarberViewModel
 import com.example.ui.components.BarberShopCard
 import com.example.ui.components.CategoryChip
+import com.example.ui.components.FlashOfferBanner
 import com.example.ui.components.LocationPill
+import com.example.ui.components.RealtimeQueueWaitingCard
 import com.example.ui.theme.*
 
 @Composable
@@ -46,6 +48,8 @@ fun HomeScreen(
     val city by viewModel.selectedCity.collectAsState()
     val shops by viewModel.filteredShops.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
+    val activeOffers by viewModel.activeOffers.collectAsState()
+    val upcomingBookings by viewModel.upcomingBookings.collectAsState()
     var searchInput by remember { mutableStateOf("") }
 
     val categories = listOf("Haircut", "Beard", "Hair Color", "Facial", "Hair Spa", "Kids Haircut")
@@ -86,19 +90,43 @@ fun HomeScreen(
                         )
                     }
 
-                    // Avatar button
-                    Surface(
-                        onClick = { viewModel.currentTab.value = 4 },
-                        shape = CircleShape,
-                        border = BorderStroke(2.dp, AmberGold),
-                        modifier = Modifier.size(46.dp)
-                    ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.img_avatar_akash),
-                            contentDescription = "Profile",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Smart Recovery Engine Console Quick Access Button
+                        Surface(
+                            onClick = { viewModel.showSmartRecoveryConsole.value = true },
+                            shape = CircleShape,
+                            color = SurfaceElevated,
+                            border = BorderStroke(1.dp, AmberGold.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .size(42.dp)
+                                .testTag("btn_smart_recovery_console")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoFixHigh,
+                                    contentDescription = "Smart Recovery Engine",
+                                    tint = AmberGold,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(10.dp))
+
+                        // Avatar button
+                        Surface(
+                            onClick = { viewModel.currentTab.value = 4 },
+                            shape = CircleShape,
+                            border = BorderStroke(2.dp, AmberGold),
+                            modifier = Modifier.size(46.dp)
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.img_avatar_akash),
+                                contentDescription = "Profile",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
                     }
                 }
             }
@@ -177,6 +205,91 @@ fun HomeScreen(
                             modifier = Modifier.size(22.dp)
                         )
                     }
+                }
+            }
+        }
+
+        // Active Cancelled Slot Recovery Flash Offer Banner (Section 62)
+        if (activeOffers.isNotEmpty()) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 8.dp)
+                ) {
+                    FlashOfferBanner(
+                        offer = activeOffers.first(),
+                        onBookNow = { viewModel.openOfferDetails(activeOffers.first()) }
+                    )
+                }
+            }
+        }
+
+        // Active 15-Minute Appointment Reminder Banner (Section 52 & 55)
+        val upcomingWithReminder = upcomingBookings.firstOrNull { it.reminderSentAt != null }
+        if (upcomingWithReminder != null) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = AmberGlow,
+                    border = BorderStroke(1.dp, AmberGold.copy(alpha = 0.5f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 6.dp)
+                        .clickable { viewModel.openReminderDetails(upcomingWithReminder) }
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(14.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = AmberGold,
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Alarm, contentDescription = null, tint = ObsidianDark, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "⏰ Appointment Starts in 15 Minutes!",
+                                color = AmberGold,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                text = "${upcomingWithReminder.shopName} • ${upcomingWithReminder.timeSlot}",
+                                color = TextPrimary,
+                                fontSize = 12.sp
+                            )
+                        }
+                        Text(
+                            text = "Directions ➔",
+                            color = AmberGold,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        // Real-Time Barber Queue Status Card on Home
+        val primaryUpcoming = upcomingBookings.firstOrNull()
+        if (primaryUpcoming != null) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 6.dp)
+                ) {
+                    RealtimeQueueWaitingCard(
+                        booking = primaryUpcoming,
+                        viewModel = viewModel,
+                        onViewLiveQueue = { viewModel.openLiveQueue(primaryUpcoming) }
+                    )
                 }
             }
         }

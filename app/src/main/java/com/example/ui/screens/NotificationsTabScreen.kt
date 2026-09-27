@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -43,7 +44,7 @@ fun NotificationsTabScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 16.dp)
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "Notification Center",
                     style = MaterialTheme.typography.headlineSmall.copy(
@@ -52,14 +53,34 @@ fun NotificationsTabScreen(
                     )
                 )
                 Text(
-                    text = "Appointment reminders, booking updates & offers",
+                    text = "Arrival reminders, cancelled slot offers & alerts",
                     style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
                 )
             }
 
-            if (notifications.any { !it.isRead }) {
-                TextButton(onClick = { viewModel.markAllNotificationsRead() }) {
-                    Text("Mark Read", color = AmberGold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    onClick = { viewModel.showSmartRecoveryConsole.value = true },
+                    shape = RoundedCornerShape(10.dp),
+                    color = SurfaceElevated,
+                    border = BorderStroke(1.dp, AmberGold.copy(alpha = 0.5f)),
+                    modifier = Modifier.testTag("btn_alerts_engine_console")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                    ) {
+                        Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = AmberGold, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Engine", color = AmberGold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                if (notifications.any { !it.isRead }) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    TextButton(onClick = { viewModel.markAllNotificationsRead() }) {
+                        Text("Mark Read", color = AmberGold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -105,7 +126,7 @@ fun NotificationsTabScreen(
                         NotificationType.REMINDER -> Triple(Icons.Default.Alarm, AmberGold, AmberGlow)
                         NotificationType.CANCELLED -> Triple(Icons.Default.Cancel, CrimsonRed, CrimsonRedBg)
                         NotificationType.RESCHEDULED -> Triple(Icons.Default.Update, SkyBlue, SkyBlueBg)
-                        NotificationType.OFFER -> Triple(Icons.Default.LocalOffer, AmberGold, AmberGlow)
+                        NotificationType.OFFER -> Triple(Icons.Default.LocalFireDepartment, CrimsonRed, CrimsonRedBg)
                     }
 
                     Card(
@@ -114,54 +135,112 @@ fun NotificationsTabScreen(
                             containerColor = if (notif.isRead) SurfaceCard else SurfaceElevated
                         ),
                         border = BorderStroke(1.dp, if (notif.isRead) BorderSubtle else AmberGold.copy(alpha = 0.4f)),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                when (notif.type) {
+                                    NotificationType.REMINDER -> {
+                                        viewModel.openReminderDetailsById(notif.relatedBookingId ?: "BK10234")
+                                    }
+                                    NotificationType.OFFER -> {
+                                        viewModel.openOfferDetailsById(notif.relatedOfferId ?: "OFFER_ROYAL_530")
+                                    }
+                                    else -> {
+                                        if (notif.relatedBookingId != null) {
+                                            viewModel.openReminderDetailsById(notif.relatedBookingId)
+                                        }
+                                    }
+                                }
+                            }
+                            .testTag("notif_card_${notif.id}")
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.Top,
-                            modifier = Modifier.padding(14.dp)
-                        ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = bgIconColor,
-                                modifier = Modifier.size(40.dp)
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.Top,
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = icon,
-                                        contentDescription = null,
-                                        tint = iconColor,
-                                        modifier = Modifier.size(20.dp)
+                                Surface(
+                                    shape = CircleShape,
+                                    color = bgIconColor,
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = icon,
+                                            contentDescription = null,
+                                            tint = iconColor,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(12.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = notif.title,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextPrimary,
+                                            fontSize = 14.sp
+                                        )
+                                        Text(
+                                            text = notif.timeAgo,
+                                            color = TextTertiary,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = notif.message,
+                                        color = TextSecondary,
+                                        fontSize = 13.sp,
+                                        lineHeight = 18.sp
                                     )
                                 }
                             }
 
-                            Spacer(modifier = Modifier.width(12.dp))
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier.fillMaxWidth()
+                            // Interactive Pill for specific notification action
+                            if (notif.type == NotificationType.REMINDER) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = AmberGlow,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { viewModel.openReminderDetailsById(notif.relatedBookingId ?: "BK10234") }
                                 ) {
-                                    Text(
-                                        text = notif.title,
-                                        fontWeight = FontWeight.Bold,
-                                        color = TextPrimary,
-                                        fontSize = 14.sp
-                                    )
-                                    Text(
-                                        text = notif.timeAgo,
-                                        color = TextTertiary,
-                                        fontSize = 11.sp
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        Text("⏰ View Appointment & Get Directions", color = AmberGold, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                        Text("Tap ➔", color = AmberGold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = notif.message,
-                                    color = TextSecondary,
-                                    fontSize = 13.sp,
-                                    lineHeight = 18.sp
-                                )
+                            } else if (notif.type == NotificationType.OFFER) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = CrimsonRedBg,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { viewModel.openOfferDetailsById(notif.relatedOfferId ?: "OFFER_ROYAL_530") }
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        Text("🔥 View & Book Recovered Slot (20% Off)", color = CrimsonRed, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                        Text("Book Now ➔", color = CrimsonRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
                         }
                     }
