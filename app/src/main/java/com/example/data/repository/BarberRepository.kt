@@ -1,20 +1,26 @@
 package com.example.data.repository
 
+import android.content.Context
 import com.example.R
 import com.example.data.local.*
 import com.example.data.model.*
+import com.example.data.network.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.*
 
-class BarberRepository(private val database: AppDatabase) {
+class BarberRepository(
+    private val database: AppDatabase,
+    private val apiService: ApiService = ApiClient.apiService
+) {
 
     private val bookingDao = database.bookingDao()
     private val favoriteDao = database.favoriteDao()
@@ -24,6 +30,15 @@ class BarberRepository(private val database: AppDatabase) {
     private val offerDeliveryRecordDao = database.offerDeliveryRecordDao()
     private val reminderRecordDao = database.reminderRecordDao()
     private val barberQueueDao = database.barberQueueDao()
+
+    // Real-Time Cloud API Connection & Health State
+    private val _apiHealthStatus = MutableStateFlow(
+        ApiHealthStatus(
+            state = ApiConnectionState.CONNECTING,
+            endpointUrl = NetworkConfig.getBaseUrl()
+        )
+    )
+    val apiHealthStatus = _apiHealthStatus.asStateFlow()
 
     // Real-Time Queue WebSocket / SSE stream
     private val _realtimeEventQueue = MutableSharedFlow<RealtimeQueueEvent>(replay = 5)
@@ -156,14 +171,152 @@ class BarberRepository(private val database: AppDatabase) {
         )
     )
 
-    // Observable favorites from Room combined with shops
+    private val _shopsListState = MutableStateFlow(baseShops)
+
+    // Observable favorites from Room combined with real-time shops
     fun getShopsFlow(): Flow<List<BarberShop>> {
-        return favoriteDao.getAllFavorites().map { favorites ->
+        return combine(_shopsListState, favoriteDao.getAllFavorites()) { shops, favorites ->
             val favIds = favorites.map { it.shopId }.toSet()
-            baseShops.map { shop ->
+            shops.map { shop ->
                 shop.copy(isFavorite = favIds.contains(shop.id))
             }
         }
+    }
+
+    /**
+     * Synchronizes local Room database and cache with the Production Cloud REST API.
+     * Evaluates latency, health state, remote shops, and active flash offers.
+     */
+    suspend fun syncWithCloudApi(context: Context? = null): Boolean {
+        _apiHealthStatus.value = _apiHealthStatus.value.copy(
+            state = ApiConnectionState.CONNECTING,
+            endpointUrl = NetworkConfig.getBaseUrl()
+        )
+        val startTime = System.currentTimeMillis()
+        return try {
+            val response = apiService.getHealth()
+            val latency = System.currentTimeMillis() - startTime
+            if (response.isSuccessful && response.body()?.status == "online") {
+                val health = response.body()
+                _apiHealthStatus.value = ApiHealthStatus(
+                    state = ApiConnectionState.CONNECTED,
+                    endpointUrl = NetworkConfig.getBaseUrl(),
+                    latencyMs = latency,
+                    serviceName = health?.service ?: "BarberCraft Express API",
+                    isDatabaseConnected = true,
+                    lastPingTimestamp = System.currentTimeMillis()
+                )
+
+                // Sync remote shops catalog into memory & flow
+                runCatching {
+                    val shopsResp = apiService.getShops()
+                    if (shopsResp.isSuccessful && shopsResp.body()?.data != null) {
+                        updateShopsFromRemote(shopsResp.body()!!.data!!)
+                    }
+                }
+
+                // Sync remote active offers into Room
+                runCatching {
+                    val offersResp = apiService.getActiveOffers()
+                    if (offersResp.isSuccessful && offersResp.body()?.data != null) {
+                        for (dto in offersResp.body()!!.data!!) {
+                            val offerId = dto.offerCode.ifEmpty { dto.id ?: "OFFER_REMOTE" }
+                            offerDao.insertOffer(
+                                RecoveredSlotOfferEntity(
+                                    id = offerId,
+                                    slotId = dto.slotId,
+                                    shopId = dto.shopId,
+                                    shopName = dto.shopName,
+                                    shopAddress = dto.shopAddress,
+                                    shopRating = dto.shopRating,
+                                    shopLat = dto.shopLat,
+                                    shopLng = dto.shopLng,
+                                    serviceName = dto.serviceName,
+                                    barberName = dto.barberName,
+                                    dateStr = dto.dateStr,
+                                    timeSlot = dto.timeSlot,
+                                    originalPrice = dto.originalPrice,
+                                    discountPercent = dto.discountPercent,
+                                    offerPrice = dto.offerPrice,
+                                    createdAt = System.currentTimeMillis(),
+                                    expiresAt = System.currentTimeMillis() + (35 * 60 * 1000),
+                                    bufferMinutes = dto.bufferMinutes,
+                                    status = dto.status,
+                                    sourceType = dto.sourceType,
+                                    distanceKm = dto.distanceKm
+                                )
+                            )
+                        }
+                    }
+                }
+                true
+            } else {
+                _apiHealthStatus.value = ApiHealthStatus(
+                    state = ApiConnectionState.OFFLINE,
+                    endpointUrl = NetworkConfig.getBaseUrl(),
+                    latencyMs = latency,
+                    isDatabaseConnected = false,
+                    errorMessage = "HTTP ${response.code()}"
+                )
+                false
+            }
+        } catch (e: Exception) {
+            _apiHealthStatus.value = ApiHealthStatus(
+                state = ApiConnectionState.OFFLINE,
+                endpointUrl = NetworkConfig.getBaseUrl(),
+                latencyMs = 0,
+                isDatabaseConnected = false,
+                errorMessage = e.message ?: "Connection error"
+            )
+            false
+        }
+    }
+
+    fun updateApiBaseUrl(newUrl: String, context: Context? = null) {
+        NetworkConfig.setBaseUrl(newUrl, context)
+        _apiHealthStatus.value = _apiHealthStatus.value.copy(endpointUrl = NetworkConfig.getBaseUrl())
+    }
+
+    private fun updateShopsFromRemote(remoteList: List<ShopDto>) {
+        if (remoteList.isEmpty()) return
+        val currentShops = _shopsListState.value.associateBy { it.id }.toMutableMap()
+        for (dto in remoteList) {
+            val key = dto.shopId ?: dto.id ?: continue
+            val existing = currentShops[key]
+            val mappedServices = dto.services?.map {
+                BarberService(it.serviceId ?: it.id ?: "s", it.name, it.category, it.price, it.durationMin, it.description)
+            } ?: existing?.services ?: emptyList()
+
+            val mappedBarbers = dto.barbers?.map {
+                Barber(it.barberId ?: it.id ?: "b", it.name, it.rating, it.experienceYears, it.specialty, it.isAvailable)
+            } ?: existing?.barbers ?: emptyList()
+
+            val mappedReviews = dto.reviews?.map {
+                Review(it.reviewId ?: it.id ?: "r", it.userName, it.rating, it.comment, it.date, it.barberName)
+            } ?: existing?.reviews ?: emptyList()
+
+            val updatedShop = BarberShop(
+                id = key,
+                name = dto.name.ifEmpty { existing?.name ?: "Barber Shop" },
+                rating = dto.rating,
+                reviewCount = dto.reviewCount,
+                distanceKm = dto.distanceKm,
+                startingPrice = dto.startingPrice,
+                nextAvailableSlot = dto.nextAvailableSlot,
+                isOpen = dto.isOpen,
+                address = dto.address.ifEmpty { existing?.address ?: "" },
+                city = dto.city.ifEmpty { existing?.city ?: "Noida" },
+                imageDrawableRes = existing?.imageDrawableRes ?: R.drawable.img_shop_royal,
+                description = dto.description.ifEmpty { existing?.description ?: "" },
+                phone = dto.phone.ifEmpty { existing?.phone ?: "+91 98765 43210" },
+                services = mappedServices,
+                barbers = mappedBarbers,
+                reviews = mappedReviews,
+                isFavorite = existing?.isFavorite ?: false
+            )
+            currentShops[key] = updatedShop
+        }
+        _shopsListState.value = currentShops.values.toList()
     }
 
     suspend fun toggleFavorite(shopId: String) {
@@ -203,6 +356,26 @@ class BarberRepository(private val database: AppDatabase) {
     }
 
     suspend fun saveBooking(booking: Booking) {
+        // Send to Cloud REST API
+        runCatching {
+            val req = CreateBookingRequest(
+                bookingNumber = booking.id,
+                shopId = booking.shopId,
+                shopName = booking.shopName,
+                shopAddress = booking.shopAddress,
+                serviceNames = booking.serviceNames,
+                barberName = booking.barberName,
+                dateStr = booking.dateStr,
+                timeSlot = booking.timeSlot,
+                durationMinutes = 30,
+                price = booking.price,
+                tax = booking.tax,
+                total = booking.total,
+                paymentMethod = booking.paymentMethod
+            )
+            apiService.createBooking(req)
+        }
+
         bookingDao.insertBooking(
             BookingEntity(
                 id = booking.id,
@@ -266,6 +439,11 @@ class BarberRepository(private val database: AppDatabase) {
     }
 
     suspend fun cancelBooking(bookingId: String) {
+        // Send cancellation to Cloud API
+        runCatching {
+            apiService.cancelBooking(bookingId)
+        }
+
         bookingDao.updateBookingStatus(bookingId, BookingStatus.CANCELLED.name)
 
         // Update queue item so waiting customer count decreases immediately in real time (Rule 5)
@@ -298,6 +476,11 @@ class BarberRepository(private val database: AppDatabase) {
     }
 
     suspend fun rescheduleBooking(bookingId: String, newDate: String, newTime: String) {
+        // Send reschedule to Cloud API
+        runCatching {
+            apiService.rescheduleBooking(bookingId, RescheduleRequest(newDate, newTime))
+        }
+
         bookingDao.rescheduleBooking(bookingId, newDate, newTime)
 
         // Update queue item in real time (Rule 5)
@@ -589,6 +772,23 @@ class BarberRepository(private val database: AppDatabase) {
     ): Result<Booking> {
         delay(400) // Atomic round-trip & DB transaction simulation
 
+        if (simulateConflict) {
+            return Result.failure(Exception("HTTP 409 Conflict: This slot has just been booked by another customer. Please view other available times."))
+        }
+
+        // Try claiming on Cloud API
+        val remoteClaimResult = runCatching {
+            val resp = apiService.claimOffer(offerId, mapOf("paymentMethod" to "Flash Offer UPI (Instant)"))
+            if (!resp.isSuccessful && resp.code() == 409) {
+                throw Exception("HTTP 409 Conflict: This slot has just been booked by another customer. Please view other available times.")
+            }
+            resp.body()?.data
+        }
+
+        if (remoteClaimResult.isFailure && remoteClaimResult.exceptionOrNull()?.message?.contains("409") == true) {
+            return Result.failure(remoteClaimResult.exceptionOrNull() ?: Exception("HTTP 409 Conflict"))
+        }
+
         val offerEntity = offerDao.getOfferById(offerId)
             ?: return Result.failure(Exception("Offer not found or no longer available."))
 
@@ -600,7 +800,7 @@ class BarberRepository(private val database: AppDatabase) {
         }
 
         // 2. Validate Slot Availability & Concurrency Lock (Atomic reservation)
-        if (simulateConflict || offerEntity.status == OfferStatus.ACCEPTED.name || offerEntity.status == OfferStatus.BOOKING_CREATED.name || offerEntity.reservedByUserId != null) {
+        if (offerEntity.status == OfferStatus.ACCEPTED.name || offerEntity.status == OfferStatus.BOOKING_CREATED.name || offerEntity.reservedByUserId != null) {
             return Result.failure(Exception("HTTP 409 Conflict: This slot has just been booked by another customer. Please view other available times."))
         }
 
@@ -1075,6 +1275,9 @@ class BarberRepository(private val database: AppDatabase) {
     }
 
     suspend fun resetQueueToDefault() {
+        runCatching {
+            apiService.resetQueue()
+        }
         barberQueueDao.clearQueue()
         seedQueueItems()
         broadcastQueueEvent(
@@ -1117,19 +1320,52 @@ class BarberRepository(private val database: AppDatabase) {
         )
     }
 
-    // Temporary Slot Hold API simulation (/api/v1/bookings/hold)
+    // Temporary Slot Hold API (/api/v1/bookings/hold)
     suspend fun holdSlot(shopId: String, slotTime: String, slotDate: String, simulateConflict: Boolean = false): Result<SlotReservation> {
         delay(400)
         if (simulateConflict) {
             return Result.failure(Exception("HTTP 409 Conflict: This slot was just booked by another customer. Please select another slot."))
         }
-        val reservation = SlotReservation(
-            reservationId = "RES" + UUID.randomUUID().toString().take(6).uppercase(),
-            shopId = shopId,
-            slotTime = slotTime,
-            slotDate = slotDate,
-            expiresAtTimestamp = System.currentTimeMillis() + (10 * 60 * 1000)
-        )
+
+        // 1. Attempt hold on Cloud REST API
+        val remoteHoldResult = runCatching {
+            val response = apiService.holdSlot(
+                HoldSlotRequest(
+                    shopId = shopId,
+                    barberName = "Rahul Sharma",
+                    slotTime = slotTime,
+                    slotDate = slotDate,
+                    simulateConflict = simulateConflict
+                )
+            )
+            if (!response.isSuccessful && response.code() == 409) {
+                throw Exception("HTTP 409 Conflict: This slot was just booked by another customer. Please select another slot.")
+            }
+            response.body()?.data
+        }
+
+        if (remoteHoldResult.isFailure && remoteHoldResult.exceptionOrNull()?.message?.contains("409") == true) {
+            return Result.failure(remoteHoldResult.exceptionOrNull() ?: Exception("HTTP 409 Conflict"))
+        }
+
+        val remoteData = remoteHoldResult.getOrNull()
+        val reservation = if (remoteData != null) {
+            SlotReservation(
+                reservationId = remoteData.reservationId,
+                shopId = remoteData.shopId,
+                slotTime = remoteData.slotTime,
+                slotDate = remoteData.slotDate,
+                expiresAtTimestamp = remoteData.expiresAtTimestamp ?: (System.currentTimeMillis() + (10 * 60 * 1000))
+            )
+        } else {
+            SlotReservation(
+                reservationId = "RES" + UUID.randomUUID().toString().take(6).uppercase(),
+                shopId = shopId,
+                slotTime = slotTime,
+                slotDate = slotDate,
+                expiresAtTimestamp = System.currentTimeMillis() + (10 * 60 * 1000)
+            )
+        }
         return Result.success(reservation)
     }
 

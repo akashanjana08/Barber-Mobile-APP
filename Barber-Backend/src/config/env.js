@@ -13,11 +13,11 @@ const config = {
 
   // Database
   database: {
-    uri: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/barbercraft',
+    uri: process.env.MONGODB_URI || 'mongodb+srv://akashbarberdb:akashbarberdb@cluster0.2yoqhwe.mongodb.net/barbercraft?retryWrites=true&w=majority&appName=Cluster0',
     options: {
       autoIndex: true,
-      serverSelectionTimeoutMS: 5000,
-      connectTimeoutMS: 10000,
+      serverSelectionTimeoutMS: 8000,
+      connectTimeoutMS: 15000,
     }
   },
 

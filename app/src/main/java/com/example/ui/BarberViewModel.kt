@@ -3,6 +3,7 @@ package com.example.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.model.*
+import com.example.data.network.ApiHealthStatus
 import com.example.data.repository.BarberRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -13,10 +14,17 @@ import java.util.UUID
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class BarberViewModel(private val repository: BarberRepository) : ViewModel() {
 
+    // Production Cloud API Sync & Status State
+    val apiHealthStatus: StateFlow<ApiHealthStatus> = repository.apiHealthStatus
+    val isSyncing = MutableStateFlow(false)
+    val showApiConfigModal = MutableStateFlow(false)
+
     init {
         viewModelScope.launch {
             repository.seedInitialDataIfEmpty()
             refreshCandidates()
+            // Automatic initial sync with public Cloud API
+            repository.syncWithCloudApi()
         }
     }
 
@@ -588,6 +596,23 @@ class BarberViewModel(private val repository: BarberRepository) : ViewModel() {
     fun resetQueueBenchmark() {
         viewModelScope.launch {
             repository.resetQueueToDefault()
+        }
+    }
+
+    fun refreshCloudSync() {
+        viewModelScope.launch {
+            isSyncing.value = true
+            repository.syncWithCloudApi()
+            isSyncing.value = false
+        }
+    }
+
+    fun updateApiEndpoint(newUrl: String) {
+        viewModelScope.launch {
+            isSyncing.value = true
+            repository.updateApiBaseUrl(newUrl)
+            repository.syncWithCloudApi()
+            isSyncing.value = false
         }
     }
 }

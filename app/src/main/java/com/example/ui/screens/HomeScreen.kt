@@ -32,11 +32,7 @@ import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.model.*
 import com.example.ui.BarberViewModel
-import com.example.ui.components.BarberShopCard
-import com.example.ui.components.CategoryChip
-import com.example.ui.components.FlashOfferBanner
-import com.example.ui.components.LocationPill
-import com.example.ui.components.RealtimeQueueWaitingCard
+import com.example.ui.components.*
 import com.example.ui.theme.*
 
 @Composable
@@ -50,6 +46,8 @@ fun HomeScreen(
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val activeOffers by viewModel.activeOffers.collectAsState()
     val upcomingBookings by viewModel.upcomingBookings.collectAsState()
+    val apiHealth by viewModel.apiHealthStatus.collectAsState()
+    val isSyncing by viewModel.isSyncing.collectAsState()
     var searchInput by remember { mutableStateOf("") }
 
     val categories = listOf("Haircut", "Beard", "Hair Color", "Facial", "Hair Spa", "Kids Haircut")
@@ -84,10 +82,20 @@ fun HomeScreen(
                             )
                         }
                         Spacer(modifier = Modifier.height(6.dp))
-                        LocationPill(
-                            cityName = city,
-                            onClick = { viewModel.showLocationPicker.value = true }
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            LocationPill(
+                                cityName = city,
+                                onClick = { viewModel.showLocationPicker.value = true }
+                            )
+                            CloudApiChip(
+                                apiHealth = apiHealth,
+                                isSyncing = isSyncing,
+                                onClick = { viewModel.showApiConfigModal.value = true }
+                            )
+                        }
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {

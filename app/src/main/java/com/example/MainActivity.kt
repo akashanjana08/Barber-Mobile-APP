@@ -87,6 +87,11 @@ fun MainAppShell(viewModel: BarberViewModel) {
     val selectedQueueBooking by viewModel.selectedQueueBooking.collectAsState()
     val showLiveQueueModal by viewModel.showLiveQueueModal.collectAsState()
 
+    // Cloud Production API State
+    val apiHealth by viewModel.apiHealthStatus.collectAsState()
+    val isSyncing by viewModel.isSyncing.collectAsState()
+    val showApiConfig by viewModel.showApiConfigModal.collectAsState()
+
     val context = LocalContext.current
 
     if (!isLoggedIn) {
@@ -405,6 +410,23 @@ fun MainAppShell(viewModel: BarberViewModel) {
                 viewModel = viewModel,
                 onDismiss = {
                     viewModel.showLiveQueueModal.value = false
+                }
+            )
+        }
+
+        // Production Cloud API Configuration & Status Dialog
+        if (showApiConfig) {
+            CloudApiConfigDialog(
+                apiHealth = apiHealth,
+                isSyncing = isSyncing,
+                onDismiss = {
+                    viewModel.showApiConfigModal.value = false
+                },
+                onRefreshSync = {
+                    viewModel.refreshCloudSync()
+                },
+                onUpdateUrl = { newUrl ->
+                    viewModel.updateApiEndpoint(newUrl)
                 }
             )
         }

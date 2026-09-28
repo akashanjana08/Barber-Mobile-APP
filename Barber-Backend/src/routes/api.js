@@ -8,7 +8,7 @@ const queueRoutes = require('./queueRoutes');
 const recoveryRoutes = require('./recoveryRoutes');
 const notificationRoutes = require('./notificationRoutes');
 const paymentRoutes = require('./paymentRoutes');
-const { getDBStatus } = require('../config/db');
+const { getDBStatus, reconnectDB } = require('../config/db');
 
 // Root API Health and Info
 router.get('/health', (req, res) => {
@@ -18,6 +18,13 @@ router.get('/health', (req, res) => {
     service: 'BarberCraft Express API',
     database: getDBStatus(),
   });
+});
+
+// Trigger Atlas Reconnection
+router.post('/db/reconnect', async (req, res) => {
+  const customUri = req.body?.uri;
+  const result = await reconnectDB(customUri);
+  res.status(result.success ? 200 : 400).json(result);
 });
 
 // Mount Resource Routes

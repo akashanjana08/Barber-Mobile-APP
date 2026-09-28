@@ -35,6 +35,7 @@ fun ProfileTabScreen(
     val user by viewModel.userProfile.collectAsState()
     val shops by viewModel.allShops.collectAsState()
     val favoriteShops = shops.filter { it.isFavorite }
+    val apiHealth by viewModel.apiHealthStatus.collectAsState()
 
     var showEditProfileDialog by remember { mutableStateOf(false) }
     var showHelpDialog by remember { mutableStateOf(false) }
@@ -208,6 +209,14 @@ fun ProfileTabScreen(
                         title = "Booking History",
                         subtitle = "View past salon visits & invoices",
                         onClick = { viewModel.currentTab.value = 2 }
+                    )
+                    HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(horizontal = 16.dp))
+
+                    ProfileMenuItem(
+                        icon = Icons.Default.CloudSync,
+                        title = "Production Cloud API",
+                        subtitle = "${apiHealth.state.label} • ${apiHealth.endpointUrl.take(24)}...",
+                        onClick = { viewModel.showApiConfigModal.value = true }
                     )
                     HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(horizontal = 16.dp))
 
