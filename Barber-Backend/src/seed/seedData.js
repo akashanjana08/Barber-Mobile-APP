@@ -1,3 +1,4 @@
+const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const BarberShop = require('../models/BarberShop');
 const Booking = require('../models/Booking');
@@ -10,6 +11,8 @@ const seedInitialData = async () => {
   try {
     console.log('[Seeder] Starting initial data seeding for BarberCraft...');
 
+    const defaultHashedPassword = await bcrypt.hash('password123', 10);
+
     // 1. Users
     const existingUser = await User.findOne({ email: 'akash.sharma@example.com' });
     let akashUser = existingUser;
@@ -19,6 +22,7 @@ const seedInitialData = async () => {
         name: 'Akash Sharma',
         email: 'akash.sharma@example.com',
         phone: '+91 98765 12340',
+        password: defaultHashedPassword,
         role: 'customer',
         location: { lat: 28.6500, lng: 77.4500, address: 'Sector 18, Wave Mall Complex, Noida' },
         locationPermissionGranted: true,
@@ -62,6 +66,15 @@ const seedInitialData = async () => {
           location: { lat: 28.6600, lng: 77.4400, address: 'Sector 29, Noida' },
           locationPermissionGranted: true,
           lastActiveAt: new Date(Date.now() - 3600000 * 8),
+        },
+        {
+          name: 'Rahul Verma',
+          email: 'rahul.verma@example.com',
+          phone: '+91 98765 43210',
+          role: 'customer',
+          location: { lat: 28.6500, lng: 77.4500, address: 'Sector 18, Noida' },
+          locationPermissionGranted: true,
+          lastActiveAt: new Date(),
         },
       ]);
       console.log('[Seeder] Users seeded.');
@@ -196,7 +209,10 @@ const seedInitialData = async () => {
     // 3. Bookings
     const existingBookings = await Booking.countDocuments();
     if (existingBookings === 0) {
+      const rahulUser = await User.findOne({ email: 'rahul.verma@example.com' });
+
       await Booking.insertMany([
+        // --- Akash Sharma's Bookings ---
         {
           bookingNumber: 'BK10234',
           userId: akashUser?._id,
@@ -207,7 +223,7 @@ const seedInitialData = async () => {
           shopAddress: 'Sector 18, Wave Mall Complex, Noida',
           serviceNames: ['Signature Royal Haircut', 'Royal Beard Sculpt & Trim'],
           barberName: 'Rahul Sharma',
-          dateStr: '25 Sep 2026',
+          dateStr: '29 Sep 2026',
           timeSlot: '5:30 PM',
           scheduledTimeMinutes: 1050,
           durationMinutes: 45,
@@ -218,6 +234,30 @@ const seedInitialData = async () => {
           paymentStatus: 'PAID',
           paymentMethod: 'UPI (Google Pay)',
           transactionId: 'TXN_9823411',
+          reminderSentAt: null,
+          isLate: false,
+        },
+        {
+          bookingNumber: 'BK08119',
+          userId: akashUser?._id,
+          customerName: 'Akash Sharma',
+          customerPhone: '+91 98765 12340',
+          shopId: 'shop_3',
+          shopName: 'The Mens Cave Lounge',
+          shopAddress: 'Sector 62, Electronic City, Noida',
+          serviceNames: ['Classic Beard Grooming & Shape'],
+          barberName: 'Vikram Singh',
+          dateStr: '24 Sep 2026',
+          timeSlot: '2:30 PM',
+          scheduledTimeMinutes: 870,
+          durationMinutes: 30,
+          price: 250,
+          tax: 12,
+          total: 262,
+          status: 'CANCELLED',
+          paymentStatus: 'REFUNDED',
+          paymentMethod: 'UPI (Google Pay)',
+          transactionId: 'TXN_6612033',
           reminderSentAt: null,
           isLate: false,
         },
@@ -243,6 +283,80 @@ const seedInitialData = async () => {
           paymentMethod: 'Credit Card',
           transactionId: 'TXN_8711094',
           reminderSentAt: new Date(Date.now() - 500000000),
+          isLate: false,
+        },
+
+        // --- Rahul Verma's Bookings ---
+        {
+          bookingNumber: 'BK20101',
+          userId: rahulUser?._id,
+          customerName: 'Rahul Verma',
+          customerPhone: '+91 98765 43210',
+          shopId: 'shop_2',
+          shopName: 'Fade & Blade Studio',
+          shopAddress: 'Sector 142, Advant Navis, Noida',
+          serviceNames: ['Executive Hair Styling & Beard Spa'],
+          barberName: 'Amit Patel',
+          dateStr: '30 Sep 2026',
+          timeSlot: '6:00 PM',
+          scheduledTimeMinutes: 1080,
+          durationMinutes: 45,
+          price: 450,
+          tax: 22,
+          total: 472,
+          status: 'UPCOMING',
+          paymentStatus: 'PAID',
+          paymentMethod: 'UPI (PhonePe)',
+          transactionId: 'TXN_5510294',
+          reminderSentAt: null,
+          isLate: false,
+        },
+        {
+          bookingNumber: 'BK20102',
+          userId: rahulUser?._id,
+          customerName: 'Rahul Verma',
+          customerPhone: '+91 98765 43210',
+          shopId: 'shop_1',
+          shopName: 'Royal Barber Club & Lounge',
+          shopAddress: 'Sector 18, Wave Mall Complex, Noida',
+          serviceNames: ['Head Massage & Hair Spa'],
+          barberName: 'Rahul Sharma',
+          dateStr: '22 Sep 2026',
+          timeSlot: '11:00 AM',
+          scheduledTimeMinutes: 660,
+          durationMinutes: 30,
+          price: 350,
+          tax: 17,
+          total: 367,
+          status: 'CANCELLED',
+          paymentStatus: 'REFUNDED',
+          paymentMethod: 'UPI (Paytm)',
+          transactionId: 'TXN_4419921',
+          reminderSentAt: null,
+          isLate: false,
+        },
+        {
+          bookingNumber: 'BK20103',
+          userId: rahulUser?._id,
+          customerName: 'Rahul Verma',
+          customerPhone: '+91 98765 43210',
+          shopId: 'shop_3',
+          shopName: 'The Mens Cave Lounge',
+          shopAddress: 'Sector 62, Electronic City, Noida',
+          serviceNames: ['Classic Haircut & Beard Trim'],
+          barberName: 'Vikram Singh',
+          dateStr: '15 Sep 2026',
+          timeSlot: '3:00 PM',
+          scheduledTimeMinutes: 900,
+          durationMinutes: 40,
+          price: 400,
+          tax: 20,
+          total: 420,
+          status: 'COMPLETED',
+          paymentStatus: 'PAID',
+          paymentMethod: 'Credit Card',
+          transactionId: 'TXN_3310088',
+          reminderSentAt: new Date(Date.now() - 700000000),
           isLate: false,
         },
       ]);

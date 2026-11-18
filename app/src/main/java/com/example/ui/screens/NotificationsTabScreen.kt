@@ -58,29 +58,9 @@ fun NotificationsTabScreen(
                 )
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    onClick = { viewModel.showSmartRecoveryConsole.value = true },
-                    shape = RoundedCornerShape(10.dp),
-                    color = SurfaceElevated,
-                    border = BorderStroke(1.dp, AmberGold.copy(alpha = 0.5f)),
-                    modifier = Modifier.testTag("btn_alerts_engine_console")
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-                    ) {
-                        Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = AmberGold, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Engine", color = AmberGold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-
-                if (notifications.any { !it.isRead }) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    TextButton(onClick = { viewModel.markAllNotificationsRead() }) {
-                        Text("Mark Read", color = AmberGold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
+            if (notifications.any { !it.isRead }) {
+                TextButton(onClick = { viewModel.markAllNotificationsRead() }) {
+                    Text("Mark Read", color = AmberGold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

@@ -13,6 +13,10 @@ const slotReservationSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    barberId: {
+      type: String,
+      default: 'b1',
+    },
     barberName: {
       type: String,
       required: true,

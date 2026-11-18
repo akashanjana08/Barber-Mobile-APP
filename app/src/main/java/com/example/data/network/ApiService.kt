@@ -23,20 +23,39 @@ interface ApiService {
     @POST("shops/{id}/favorite")
     suspend fun toggleShopFavorite(@Path("id") shopId: String): Response<ApiResponse<Map<String, Any>>>
 
+    // Availability
+    @GET("shops/{shopId}/barbers/{barberId}/availability")
+    suspend fun getBarberAvailability(
+        @Path("shopId") shopId: String,
+        @Path("barberId") barberId: String,
+        @Query("date") date: String,
+        @Query("serviceIds") serviceIds: String? = null,
+        @Query("slotIntervalMinutes") slotIntervalMinutes: Int = 30
+    ): Response<ApiResponse<BarberAvailabilityResponseDto>>
+
     // Bookings & Slot Lock
+    @POST("bookings/quick-queue/preview")
+    suspend fun previewQuickQueue(@Body request: QuickQueuePreviewRequest): Response<ApiResponse<QuickQueuePreviewDto>>
+
+    @POST("bookings/quick-queue/confirm")
+    suspend fun confirmQuickQueue(@Body request: QuickQueueConfirmRequest): Response<ApiResponse<QuickQueueConfirmDto>>
+
     @POST("bookings/hold")
-    suspend fun holdSlot(@Body request: HoldSlotRequest): Response<ApiResponse<HoldSlotResponse>>
+    suspend fun holdSlot(@Body request: HoldSlotRequest): Response<HoldSlotResponseDto>
 
     @POST("bookings")
     suspend fun createBooking(@Body request: CreateBookingRequest): Response<ApiResponse<BookingDto>>
 
     @GET("bookings")
-    suspend fun getBookings(): Response<ApiResponse<List<BookingDto>>>
+    suspend fun getBookings(
+        @Query("status") status: String? = null,
+        @Query("userId") userId: String? = null
+    ): Response<ApiResponse<List<BookingDto>>>
 
     @POST("bookings/{id}/cancel")
     suspend fun cancelBooking(
         @Path("id") bookingId: String,
-        @Body reason: Map<String, String> = emptyMap()
+        @Body request: CancelBookingRequest = CancelBookingRequest()
     ): Response<ApiResponse<BookingDto>>
 
     @POST("bookings/{id}/reschedule")
@@ -84,4 +103,15 @@ interface ApiService {
 
     @PUT("notifications/read-all")
     suspend fun markAllNotificationsRead(): Response<ApiResponse<Any>>
+
+    // Authentication Endpoints
+    @POST("auth/login")
+    suspend fun login(@Body request: LoginRequest): Response<ApiResponse<AuthDataDto>>
+
+    @POST("auth/register")
+    suspend fun register(@Body request: RegisterRequest): Response<ApiResponse<AuthDataDto>>
+
+    @GET("auth/me")
+    suspend fun getMe(@Header("Authorization") authHeader: String? = null): Response<ApiResponse<UserDto>>
 }
+

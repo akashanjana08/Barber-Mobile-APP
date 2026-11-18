@@ -19,10 +19,14 @@ object ApiClient {
             .build()
     }
 
-    // Dynamic Base URL Interceptor so switching URLs at runtime updates all ongoing API calls
+    // Dynamic Base URL and Auth Interceptor
     private val dynamicUrlInterceptor = Interceptor { chain ->
         var originalRequest = chain.request()
         val currentBaseUrl = NetworkConfig.getBaseUrl().toHttpUrlOrNull()
+
+        val requestBuilder = originalRequest.newBuilder()
+            .addHeader("Accept", "application/json")
+            .addHeader("User-Agent", "BarberCraft-Android-Client/1.0")
 
         if (currentBaseUrl != null) {
             val newUrl = originalRequest.url.newBuilder()
@@ -30,15 +34,16 @@ object ApiClient {
                 .host(currentBaseUrl.host)
                 .port(currentBaseUrl.port)
                 .build()
-
-            originalRequest = originalRequest.newBuilder()
-                .url(newUrl)
-                .addHeader("Accept", "application/json")
-                .addHeader("User-Agent", "BarberCraft-Android-Client/1.0")
-                .build()
+            requestBuilder.url(newUrl)
         }
 
-        chain.proceed(originalRequest)
+        // Attach JWT Bearer Token if available and not already provided
+        val token = com.example.data.local.SessionManager.authToken
+        if (!token.isNullOrBlank() && originalRequest.header("Authorization") == null) {
+            requestBuilder.addHeader("Authorization", "Bearer $token")
+        }
+
+        chain.proceed(requestBuilder.build())
     }
 
     private val okHttpClient: OkHttpClient by lazy {

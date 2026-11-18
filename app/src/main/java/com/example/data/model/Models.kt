@@ -16,6 +16,12 @@ enum class BookingStatus {
     NO_SHOW
 }
 
+enum class AppointmentTab(val statusKey: String, val displayName: String) {
+    UPCOMING("UPCOMING", "Upcoming"),
+    CANCELLED("CANCELLED", "Cancelled"),
+    COMPLETED("COMPLETED", "Completed")
+}
+
 enum class OfferStatus {
     CREATED,
     SENT,
@@ -119,6 +125,11 @@ data class BarberShop(
     val phone: String = "+91 98765 43210"
 )
 
+enum class BookingMode {
+    QUICK_QUEUE,
+    SCHEDULED
+}
+
 data class Booking(
     val id: String,
     val shopId: String,
@@ -136,7 +147,13 @@ data class Booking(
     val paymentMethod: String = "UPI (GPay)",
     val createdAt: Long = System.currentTimeMillis(),
     val reminderSentAt: Long? = null,
-    val isLate: Boolean = false
+    val isLate: Boolean = false,
+    val bookingMode: String = "SCHEDULED",
+    val barberId: String? = null,
+    val serviceIds: List<String> = emptyList(),
+    val bookingDate: String? = null,
+    val startTime: String? = null,
+    val durationMinutes: Int = 30
 )
 
 data class SlotReservation(
@@ -144,7 +161,9 @@ data class SlotReservation(
     val shopId: String,
     val slotTime: String,
     val slotDate: String,
-    val expiresAtTimestamp: Long
+    val expiresAtTimestamp: Long,
+    val barberId: String? = null,
+    val barberName: String? = null
 )
 
 enum class NotificationType {

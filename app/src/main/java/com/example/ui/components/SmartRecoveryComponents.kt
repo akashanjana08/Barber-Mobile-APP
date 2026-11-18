@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.*
+import com.example.data.util.BookingDateUtils
 import com.example.ui.BarberViewModel
 import com.example.ui.theme.*
 import kotlinx.coroutines.delay
@@ -326,7 +327,7 @@ fun FlashOfferModal(
                         ) {
                             Column {
                                 Text("Time Slot", color = TextTertiary, fontSize = 11.sp)
-                                Text("${offer.dateStr} • ${offer.timeSlot}", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text(BookingDateUtils.formatUserFriendlyDateTime(offer.dateStr, offer.timeSlot), color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             }
                             Column(horizontalAlignment = Alignment.End) {
                                 Text("Original", color = TextTertiary, fontSize = 11.sp)
@@ -579,7 +580,7 @@ fun AppointmentReminderModal(
                         ) {
                             Column {
                                 Text("Scheduled Time", color = TextTertiary, fontSize = 11.sp)
-                                Text("${booking.timeSlot} • ${booking.dateStr}", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text(BookingDateUtils.formatUserFriendlyDateTime(booking.dateStr, booking.timeSlot), color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             }
                             Column(horizontalAlignment = Alignment.End) {
                                 Text("Status", color = TextTertiary, fontSize = 11.sp)

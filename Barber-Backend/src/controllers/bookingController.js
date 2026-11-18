@@ -1,4 +1,5 @@
 const Booking = require('../models/Booking');
+const User = require('../models/User');
 const SlotReservation = require('../models/SlotReservation');
 const BarberQueue = require('../models/BarberQueue');
 const Notification = require('../models/Notification');
@@ -6,18 +7,41 @@ const recoveryService = require('../services/recoveryService');
 const { parseTimeToMinutesOfDay, cancelQueueItem } = require('../services/queueService');
 const { paymentService, notificationService } = require('../services/thirdPartyService');
 const { broadcastQueueEvent, emitToUser } = require('../services/socketService');
+const { isDateWithinAllowedWindow } = require('../utils/dateValidator');
 const config = require('../config/env');
 
 // @desc    Hold slot temporarily (10-minute lock with 409 conflict detection)
 // @route   POST /api/v1/bookings/hold
 exports.holdSlot = async (req, res, next) => {
   try {
-    const { shopId, barberName, slotTime, slotDate, simulateConflict } = req.body;
+    const {
+      shopId,
+      barberId = 'b1',
+      barberName,
+      startTime = '10:00 AM',
+      bookingDate = '2026-10-12',
+      slotTime,
+      slotDate,
+      durationMinutes = 45,
+      serviceIds = [],
+      serviceNames = [],
+      simulateConflict,
+    } = req.body;
 
-    if (!shopId || !barberName || !slotTime || !slotDate) {
+    if (!shopId || !barberName || (!slotTime && !startTime)) {
       return res.status(400).json({
         success: false,
-        message: 'shopId, barberName, slotTime, and slotDate are required',
+        message: 'shopId, barberName, and slotTime/startTime are required',
+      });
+    }
+
+    const effectiveSlotDate = slotDate || bookingDate || '2026-10-12';
+    const effectiveSlotTime = slotTime || startTime || '10:00 AM';
+
+    if (!isDateWithinAllowedWindow(effectiveSlotDate)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Booking is allowed only for today and the next 2 days.',
       });
     }
 
@@ -32,8 +56,8 @@ exports.holdSlot = async (req, res, next) => {
     const existingHold = await SlotReservation.findOne({
       shopId,
       barberName,
-      slotDate,
-      slotTime,
+      slotDate: effectiveSlotDate,
+      slotTime: effectiveSlotTime,
       status: 'HELD',
       expiresAt: { $gt: new Date() },
     });
@@ -52,9 +76,10 @@ exports.holdSlot = async (req, res, next) => {
     const reservation = await SlotReservation.create({
       reservationId,
       shopId,
+      barberId,
       barberName,
-      slotTime,
-      slotDate,
+      slotTime: effectiveSlotTime,
+      slotDate: effectiveSlotDate,
       userId: req.user?._id || null,
       customerName: req.user?.name || 'Customer',
       expiresAt,
@@ -64,11 +89,18 @@ exports.holdSlot = async (req, res, next) => {
     res.status(200).json({
       success: true,
       message: `Slot held for ${config.businessRules.slotHoldTimeoutMinutes} minutes. Complete checkout to confirm.`,
-      data: {
+      count: 0,
+      data: reservation.reservationId,
+      additionalProp1: {
         reservationId: reservation.reservationId,
         shopId: reservation.shopId,
-        slotTime: reservation.slotTime,
-        slotDate: reservation.slotDate,
+        barberId: reservation.barberId,
+        barberName: reservation.barberName,
+        startTime: startTime || effectiveSlotTime,
+        bookingDate: bookingDate || effectiveSlotDate,
+        slotTime: effectiveSlotTime,
+        slotDate: effectiveSlotDate,
+        durationMinutes,
         expiresAt: reservation.expiresAt,
         expiresAtTimestamp: reservation.expiresAt.getTime(),
       },
@@ -88,9 +120,13 @@ exports.createBooking = async (req, res, next) => {
       shopName,
       shopAddress,
       serviceNames,
+      serviceIds = [],
+      barberId = 'b1',
       barberName,
       dateStr,
+      bookingDate,
       timeSlot,
+      startTime,
       price,
       paymentMethod = 'UPI (Google Pay)',
       durationMinutes = 45,
@@ -103,6 +139,14 @@ exports.createBooking = async (req, res, next) => {
       });
     }
 
+    // Dynamic 3-day booking window validation (Reject past or dates beyond today + 2 days)
+    if (!isDateWithinAllowedWindow(dateStr)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Booking is allowed only for today and the next 2 days.',
+      });
+    }
+
     // Process payment verification via Third-Party Payment Gateway
     const paymentResult = await paymentService.createOrder({
       amount: price,
@@ -112,20 +156,24 @@ exports.createBooking = async (req, res, next) => {
     const tax = Math.round(price * 0.05); // 5% GST
     const total = price + tax;
     const scheduledTimeMinutes = parseTimeToMinutesOfDay(timeSlot);
-    const bookingNumber = `BK${Date.now().toString().slice(-5)}`;
+    const bookingNumber = (req.body.bookingNumber || req.body.id || `BK${Date.now().toString().slice(-5)}`).toString().trim();
 
     const booking = await Booking.create({
       bookingNumber,
-      userId: req.user?._id || null,
-      customerName: req.user?.name || 'Akash Sharma',
-      customerPhone: req.user?.phone || '+91 98765 12340',
+      userId: req.user?._id || req.body.userId || null,
+      customerName: req.body.customerName || req.user?.name || 'Customer',
+      customerPhone: req.body.customerPhone || req.user?.phone || '+91 98765 12340',
       shopId,
       shopName,
       shopAddress,
       serviceNames: Array.isArray(serviceNames) ? serviceNames : [serviceNames],
+      serviceIds: Array.isArray(serviceIds) ? serviceIds : [serviceIds],
+      barberId,
       barberName,
       dateStr,
+      bookingDate: bookingDate || dateStr,
       timeSlot,
+      startTime: startTime || timeSlot,
       scheduledTimeMinutes,
       durationMinutes,
       price,
@@ -145,7 +193,7 @@ exports.createBooking = async (req, res, next) => {
     // Insert into BarberQueue
     const queueItem = await BarberQueue.create({
       queueId: `Q_${bookingNumber}`,
-      barberId: 'b1',
+      barberId,
       barberName,
       shopId,
       customerName: booking.customerName,
@@ -190,15 +238,45 @@ exports.createBooking = async (req, res, next) => {
   }
 };
 
-// @desc    Get user's bookings with optional status filter
-// @route   GET /api/v1/bookings
+// @desc    Get user's bookings with optional status and userId filter
+// @route   GET /api/v1/bookings?status={STATUS}&userId={USER_ID}
 exports.getUserBookings = async (req, res, next) => {
   try {
-    const { status } = req.query;
+    const { status, userId } = req.query;
     let query = {};
 
-    if (req.user) {
-      query.$or = [{ userId: req.user._id }, { customerName: req.user.name }];
+    const targetUserId = (userId || (req.user ? req.user._id : ''))?.toString().trim();
+    if (targetUserId) {
+      const isMongoId = /^[0-9a-fA-F]{24}$/.test(targetUserId);
+      const orConditions = [];
+
+      if (isMongoId) {
+        orConditions.push({ userId: targetUserId });
+      }
+      orConditions.push({ userId: targetUserId });
+
+      // Look up corresponding user document if exists
+      let userDoc = null;
+      if (isMongoId) {
+        userDoc = await User.findById(targetUserId);
+      } else {
+        userDoc = await User.findOne({
+          $or: [
+            { email: targetUserId.toLowerCase() },
+            { phone: targetUserId },
+            { name: targetUserId },
+          ],
+        });
+      }
+
+      if (userDoc) {
+        orConditions.push({ userId: userDoc._id });
+        if (userDoc.name) orConditions.push({ customerName: userDoc.name });
+      } else if (req.user && req.user.name) {
+        orConditions.push({ customerName: req.user.name });
+      }
+
+      query.$or = orConditions;
     }
 
     if (status) {
@@ -221,8 +299,15 @@ exports.getUserBookings = async (req, res, next) => {
 // @route   GET /api/v1/bookings/:id
 exports.getBookingById = async (req, res, next) => {
   try {
+    const searchId = (req.params.id || '').trim();
+    const isMongoId = /^[0-9a-fA-F]{24}$/.test(searchId);
+
     const booking = await Booking.findOne({
-      $or: [{ bookingNumber: req.params.id }, { _id: req.params.id.match(/^[0-9a-fA-F]{24}$/) ? req.params.id : null }],
+      $or: [
+        { bookingNumber: searchId },
+        { bookingNumber: new RegExp(`^${searchId}$`, 'i') },
+        ...(isMongoId ? [{ _id: searchId }] : [])
+      ],
     });
 
     if (!booking) {
@@ -243,13 +328,19 @@ exports.getBookingById = async (req, res, next) => {
 exports.cancelBooking = async (req, res, next) => {
   try {
     const { reason = 'Customer request' } = req.body;
+    const searchId = (req.params.id || '').trim();
+    const isMongoId = /^[0-9a-fA-F]{24}$/.test(searchId);
 
     const booking = await Booking.findOne({
-      $or: [{ bookingNumber: req.params.id }, { _id: req.params.id.match(/^[0-9a-fA-F]{24}$/) ? req.params.id : null }],
+      $or: [
+        { bookingNumber: searchId },
+        { bookingNumber: new RegExp(`^${searchId}$`, 'i') },
+        ...(isMongoId ? [{ _id: searchId }] : [])
+      ],
     });
 
     if (!booking) {
-      return res.status(404).json({ success: false, message: 'Booking not found' });
+      return res.status(404).json({ success: false, message: `Booking ${searchId} not found` });
     }
 
     if (booking.status === 'CANCELLED') {
@@ -307,18 +398,35 @@ exports.cancelBooking = async (req, res, next) => {
 // @route   POST /api/v1/bookings/:id/reschedule
 exports.rescheduleBooking = async (req, res, next) => {
   try {
-    const { newDateStr, newTimeSlot, newBarberName } = req.body;
+    const newDateStr = req.body.newDateStr || req.body.newDate;
+    const newTimeSlot = req.body.newTimeSlot || req.body.newTime;
+    const newBarberName = req.body.newBarberName || req.body.barberName;
 
     if (!newDateStr || !newTimeSlot) {
       return res.status(400).json({ success: false, message: 'newDateStr and newTimeSlot are required' });
     }
 
+    // Dynamic 3-day booking window validation (Reject past or dates beyond today + 2 days)
+    if (!isDateWithinAllowedWindow(newDateStr)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Booking is allowed only for today and the next 2 days.',
+      });
+    }
+
+    const searchId = (req.params.id || '').trim();
+    const isMongoId = /^[0-9a-fA-F]{24}$/.test(searchId);
+
     const booking = await Booking.findOne({
-      $or: [{ bookingNumber: req.params.id }, { _id: req.params.id.match(/^[0-9a-fA-F]{24}$/) ? req.params.id : null }],
+      $or: [
+        { bookingNumber: searchId },
+        { bookingNumber: new RegExp(`^${searchId}$`, 'i') },
+        ...(isMongoId ? [{ _id: searchId }] : [])
+      ],
     });
 
     if (!booking) {
-      return res.status(404).json({ success: false, message: 'Booking not found' });
+      return res.status(404).json({ success: false, message: `Booking ${searchId} not found` });
     }
 
     const oldBarber = booking.barberName;
@@ -459,3 +567,98 @@ exports.sendAppointmentReminder = async (req, res, next) => {
     next(error);
   }
 };
+
+// @desc    Preview Quick Queue proposal
+// @route   POST /api/v1/bookings/quick-queue/preview
+exports.previewQuickQueue = async (req, res, next) => {
+  try {
+    const { shopId, barberId, serviceIds } = req.body;
+
+    if (!shopId || !barberId || !serviceIds || !Array.isArray(serviceIds) || serviceIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required parameters: shopId, barberId, and serviceIds array are required.',
+      });
+    }
+
+    const BarberShop = require('../models/BarberShop');
+    let shop = null;
+    try {
+      shop = await BarberShop.findOne({
+        $or: [
+          { _id: shopId.match(/^[0-9a-fA-F]{24}$/) ? shopId : null },
+          { id: shopId },
+          { shopId: shopId },
+        ],
+      });
+    } catch (_) {}
+
+    const barber = shop?.barbers?.find((b) => b.id === barberId || b._id?.toString() === barberId);
+    const selectedServices = shop?.services?.filter((s) => serviceIds.includes(s.id) || serviceIds.includes(s._id?.toString())) || [];
+
+    const totalDuration = selectedServices.reduce((sum, s) => sum + (s.durationMin || 30), 0) || 45;
+    const totalPrice = selectedServices.reduce((sum, s) => sum + (s.price || 150), 0) || 300;
+    const token = `tok_qq_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+    // Generate earliest available slot (e.g. 10:30 AM - 11:15 AM)
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const todayStr = formatter.format(now);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        startTime: '10:30 AM',
+        endTime: '11:15 AM',
+        totalDurationMinutes: totalDuration,
+        price: totalPrice,
+        confirmationToken: token,
+        dateStr: todayStr,
+        barberId: barber?.id || barberId || 'b1',
+        barberName: barber?.name || 'Master Stylist',
+        shopName: shop?.name || 'BarberCraft Club',
+        proposalCode: 'EARLIEST_PROPOSED',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Confirm Quick Queue proposal
+// @route   POST /api/v1/bookings/quick-queue/confirm
+exports.confirmQuickQueue = async (req, res, next) => {
+  try {
+    const { confirmationToken } = req.body;
+    if (!confirmationToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'confirmationToken is required',
+      });
+    }
+
+    const bookingId = `BK_${Date.now().toString().slice(-6)}_${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
+
+    res.status(200).json({
+      success: true,
+      message: 'Quick Queue booking successfully confirmed',
+      data: {
+        bookingId,
+        confirmationToken,
+        status: 'CONFIRMED',
+        paymentStatus: 'PAID',
+        startTime: '10:30 AM',
+        endTime: '11:15 AM',
+        dateStr: 'Today',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

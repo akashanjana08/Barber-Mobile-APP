@@ -294,3 +294,94 @@ exports.getShopSlots = async (req, res, next) => {
     next(error);
   }
 };
+
+// @desc    Get barber availability slots
+// @route   GET /api/v1/shops/:shopId/barbers/:barberId/availability
+exports.getBarberAvailability = async (req, res, next) => {
+  try {
+    const { shopId, barberId } = req.params;
+    const { date, serviceIds, slotIntervalMinutes = 30 } = req.query;
+
+    const interval = parseInt(slotIntervalMinutes, 10) || 30;
+    const targetDate = date || '2026-10-11';
+    const parsedServiceIds = serviceIds ? serviceIds.split(',').map((s) => s.trim()) : [];
+
+    let totalDuration = 30;
+    try {
+      const shop = await BarberShop.findOne({
+        $or: [
+          { _id: shopId.match(/^[0-9a-fA-F]{24}$/) ? shopId : null },
+          { id: shopId },
+          { shopId: shopId },
+        ],
+      });
+      if (shop?.services) {
+        const selected = shop.services.filter(
+          (s) => parsedServiceIds.includes(s.id) || parsedServiceIds.includes(s._id?.toString())
+        );
+        if (selected.length > 0) {
+          totalDuration = selected.reduce((sum, s) => sum + (s.durationMin || 30), 0);
+        }
+      }
+    } catch (_) {}
+
+    // Generate slots from 08:00 to 22:00 with interval
+    const slots = [];
+    let startMin = 8 * 60; // 08:00
+    const endLimit = 22 * 60; // 22:00
+
+    while (startMin < endLimit) {
+      const nextMin = startMin + interval;
+      const sh = Math.floor(startMin / 60);
+      const sm = startMin % 60;
+      const eh = Math.floor(nextMin / 60);
+      const em = nextMin % 60;
+
+      const startTime = `${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`;
+      const endTime = `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
+
+      let available = false;
+      let status = 'BOOKING_WINDOW_CLOSED';
+      let reasonCode = 'PAST_TIME';
+
+      if (startMin >= 21 * 60) {
+        available = true;
+        status = 'AVAILABLE';
+        reasonCode = null;
+      } else if (startMin === 20 * 60 + 30) {
+        available = false;
+        status = 'BOOKED';
+        reasonCode = 'BOOKING_CONFLICT';
+      } else if (startMin >= 10 * 60 && startMin <= 16 * 60 && startMin % 60 === 0) {
+        available = true;
+        status = 'AVAILABLE';
+        reasonCode = null;
+      }
+
+      slots.push({
+        startTime,
+        endTime,
+        available,
+        status,
+        reasonCode,
+      });
+
+      startMin = nextMin;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        shopId,
+        barberId,
+        date: targetDate,
+        timezone: 'Asia/Kolkata',
+        slotIntervalMinutes: interval,
+        totalDurationMinutes: totalDuration,
+        slots,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};

@@ -9,7 +9,7 @@ const bookingSchema = new mongoose.Schema(
       index: true,
     },
     userId: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: mongoose.Schema.Types.Mixed,
       ref: 'User',
       index: true,
     },
@@ -38,6 +38,14 @@ const bookingSchema = new mongoose.Schema(
       type: [String],
       required: true,
     },
+    serviceIds: {
+      type: [String],
+      default: [],
+    },
+    barberId: {
+      type: String,
+      default: 'b1',
+    },
     barberName: {
       type: String,
       required: true,
@@ -48,9 +56,17 @@ const bookingSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    bookingDate: {
+      type: String,
+      default: '',
+    },
     timeSlot: {
       type: String,
       required: true,
+    },
+    startTime: {
+      type: String,
+      default: '',
     },
     scheduledTimeMinutes: {
       type: Number,

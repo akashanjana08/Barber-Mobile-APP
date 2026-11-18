@@ -9,5 +9,6 @@ router.post('/:id/favorite', protect, shopController.toggleFavorite);
 router.get('/:id/reviews', shopController.getShopReviews);
 router.post('/:id/reviews', optionalAuth, shopController.addShopReview);
 router.get('/:id/slots', shopController.getShopSlots);
+router.get('/:shopId/barbers/:barberId/availability', shopController.getBarberAvailability);
 
 module.exports = router;

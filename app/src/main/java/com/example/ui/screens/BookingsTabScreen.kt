@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -20,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.*
+import com.example.data.util.BookingDateUtils
 import com.example.ui.BarberViewModel
 import com.example.ui.components.RealtimeQueueWaitingCard
 import com.example.ui.theme.*
@@ -29,11 +31,27 @@ fun BookingsTabScreen(
     viewModel: BarberViewModel,
     modifier: Modifier = Modifier
 ) {
-    val upcomingBookings by viewModel.upcomingBookings.collectAsState()
-    val completedBookings by viewModel.completedBookings.collectAsState()
-    val cancelledBookings by viewModel.cancelledBookings.collectAsState()
+    val selectedTab by viewModel.selectedAppointmentTab.collectAsState()
+    val rawAppointmentsList by viewModel.apiAppointments.collectAsState()
+    val isLoading by viewModel.isLoadingAppointments.collectAsState()
+    val errorMsg by viewModel.appointmentError.collectAsState()
+    val userProfile by viewModel.userProfile.collectAsState()
 
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Upcoming, 1: Completed, 2: Cancelled
+    // Strictly filter out past date and time slots in the Upcoming tab
+    val currentList = remember(rawAppointmentsList, selectedTab) {
+        if (selectedTab == AppointmentTab.UPCOMING) {
+            rawAppointmentsList.filter { booking ->
+                BookingDateUtils.isSlotUpcoming(booking.dateStr, booking.timeSlot)
+            }
+        } else {
+            rawAppointmentsList
+        }
+    }
+
+    // Ensure appointments are loaded on entry or user change
+    LaunchedEffect(selectedTab, userProfile.id) {
+        viewModel.fetchAppointmentsForCurrentTab()
+    }
 
     Column(
         modifier = modifier
@@ -61,7 +79,7 @@ fun BookingsTabScreen(
                         )
                     )
                     Text(
-                        text = "Smart reminders, cancelled slot recovery & bookings",
+                        text = "Real-time bookings from cloud API (${userProfile?.name ?: "Customer"})",
                         style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
                     )
                 }
@@ -86,7 +104,7 @@ fun BookingsTabScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Sub-tabs row
+            // Sub-tabs row: Upcoming | Cancelled | Completed
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -95,39 +113,89 @@ fun BookingsTabScreen(
                     .padding(4.dp)
             ) {
                 listOf(
-                    "Upcoming (${upcomingBookings.size})" to 0,
-                    "Completed (${completedBookings.size})" to 1,
-                    "Cancelled (${cancelledBookings.size})" to 2
-                ).forEach { (title, idx) ->
-                    val isSelected = selectedTab == idx
+                    AppointmentTab.UPCOMING,
+                    AppointmentTab.CANCELLED,
+                    AppointmentTab.COMPLETED
+                ).forEach { tab ->
+                    val isSelected = selectedTab == tab
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(10.dp))
                             .background(if (isSelected) AmberGold else androidx.compose.ui.graphics.Color.Transparent)
-                            .clickable { selectedTab = idx }
+                            .clickable { viewModel.selectAppointmentTab(tab) }
                             .padding(vertical = 10.dp)
+                            .testTag("tab_${tab.statusKey.lowercase()}")
                     ) {
                         Text(
-                            text = title,
+                            text = tab.displayName,
                             color = if (isSelected) ObsidianDark else TextSecondary,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            fontSize = 12.sp
+                            fontSize = 13.sp
                         )
                     }
                 }
             }
         }
 
-        // Active List
-        val currentList = when (selectedTab) {
-            0 -> upcomingBookings
-            1 -> completedBookings
-            else -> cancelledBookings
-        }
-
-        if (currentList.isEmpty()) {
+        // Active List or Loading State
+        if (isLoading) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(32.dp)
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = AmberGold, modifier = Modifier.size(36.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Text(
+                        text = "Loading appointments from API...",
+                        color = TextSecondary,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+        } else if (errorMsg != null && currentList.isEmpty()) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(32.dp)
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = CrimsonRed,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Unable to fetch appointments",
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        fontSize = 16.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = errorMsg ?: "Please verify your connection.",
+                        color = TextSecondary,
+                        fontSize = 13.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = { viewModel.fetchAppointmentsForCurrentTab() },
+                        colors = ButtonDefaults.buttonColors(containerColor = AmberGold, contentColor = ObsidianDark),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Retry", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        } else if (currentList.isEmpty()) {
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
@@ -144,9 +212,9 @@ fun BookingsTabScreen(
                     Spacer(modifier = Modifier.height(14.dp))
                     Text(
                         text = when (selectedTab) {
-                            0 -> "No upcoming appointments"
-                            1 -> "No completed appointments yet"
-                            else -> "No cancelled appointments"
+                            AppointmentTab.UPCOMING -> "No upcoming appointments"
+                            AppointmentTab.CANCELLED -> "No cancelled appointments"
+                            AppointmentTab.COMPLETED -> "No completed appointments yet"
                         },
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,
@@ -154,18 +222,24 @@ fun BookingsTabScreen(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Find a top-rated barber in your area and book your next haircut.",
+                        text = when (selectedTab) {
+                            AppointmentTab.UPCOMING -> "Find a top-rated barber in your area and book your next haircut."
+                            AppointmentTab.CANCELLED -> "You have no cancelled appointments."
+                            AppointmentTab.COMPLETED -> "Completed appointments will appear here after your service."
+                        },
                         color = TextSecondary,
                         fontSize = 13.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
-                    Spacer(modifier = Modifier.height(18.dp))
-                    Button(
-                        onClick = { viewModel.currentTab.value = 0 },
-                        colors = ButtonDefaults.buttonColors(containerColor = AmberGold, contentColor = ObsidianDark),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("Explore Barbers", fontWeight = FontWeight.Bold)
+                    if (selectedTab == AppointmentTab.UPCOMING) {
+                        Spacer(modifier = Modifier.height(18.dp))
+                        Button(
+                            onClick = { viewModel.currentTab.value = 0 },
+                            colors = ButtonDefaults.buttonColors(containerColor = AmberGold, contentColor = ObsidianDark),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Explore Barbers", fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -175,7 +249,7 @@ fun BookingsTabScreen(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(currentList, key = { it.id }) { booking ->
+                itemsIndexed(currentList, key = { index, booking -> "${booking.id}_${booking.status.name}_$index" }) { _, booking ->
                     Card(
                         shape = RoundedCornerShape(18.dp),
                         colors = CardDefaults.cardColors(containerColor = SurfaceCard),
@@ -198,6 +272,25 @@ fun BookingsTabScreen(
                                         color = TextPrimary,
                                         fontSize = 16.sp
                                     )
+                                    if (booking.shopAddress.isNotBlank()) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(vertical = 2.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.LocationOn,
+                                                contentDescription = null,
+                                                tint = AmberGold,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = booking.shopAddress,
+                                                color = TextSecondary,
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    }
                                     Text(
                                         text = booking.id,
                                         color = AmberGold,
@@ -304,7 +397,7 @@ fun BookingsTabScreen(
                                 Icon(Icons.Default.AccessTime, contentDescription = null, tint = AmberGold, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "${booking.timeSlot} • ${booking.dateStr}",
+                                    text = BookingDateUtils.formatUserFriendlyDateTime(booking.dateStr, booking.timeSlot),
                                     color = TextSecondary,
                                     fontSize = 13.sp
                                 )

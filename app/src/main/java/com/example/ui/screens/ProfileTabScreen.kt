@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -35,11 +36,11 @@ fun ProfileTabScreen(
     val user by viewModel.userProfile.collectAsState()
     val shops by viewModel.allShops.collectAsState()
     val favoriteShops = shops.filter { it.isFavorite }
-    val apiHealth by viewModel.apiHealthStatus.collectAsState()
 
     var showEditProfileDialog by remember { mutableStateOf(false) }
     var showHelpDialog by remember { mutableStateOf(false) }
     var showPolicyDialog by remember { mutableStateOf(false) }
+    var showLogoutDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 100.dp),
@@ -83,7 +84,7 @@ fun ProfileTabScreen(
                         modifier = Modifier.size(70.dp)
                     ) {
                         Image(
-                            painter = painterResource(id = R.drawable.img_avatar_akash),
+                            painter = painterResource(id = R.drawable.img_profile_avatar),
                             contentDescription = "Profile Photo",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
@@ -213,22 +214,6 @@ fun ProfileTabScreen(
                     HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(horizontal = 16.dp))
 
                     ProfileMenuItem(
-                        icon = Icons.Default.CloudSync,
-                        title = "Production Cloud API",
-                        subtitle = "${apiHealth.state.label} • ${apiHealth.endpointUrl.take(24)}...",
-                        onClick = { viewModel.showApiConfigModal.value = true }
-                    )
-                    HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(horizontal = 16.dp))
-
-                    ProfileMenuItem(
-                        icon = Icons.Default.CreditCard,
-                        title = "Payment Methods",
-                        subtitle = "Saved UPI IDs, cards & net banking",
-                        onClick = { /* Informational */ }
-                    )
-                    HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(horizontal = 16.dp))
-
-                    ProfileMenuItem(
                         icon = Icons.Default.Policy,
                         title = "Cancellation Policy",
                         subtitle = "Free 2-hour cancellation rules",
@@ -249,7 +234,7 @@ fun ProfileTabScreen(
                         title = "Log Out",
                         subtitle = "Sign out of your customer account",
                         textColor = CrimsonRed,
-                        onClick = { viewModel.isLoggedIn.value = false }
+                        onClick = { showLogoutDialog = true }
                     )
                 }
             }
@@ -351,6 +336,77 @@ fun ProfileTabScreen(
             confirmButton = {
                 Button(onClick = { showHelpDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = AmberGold, contentColor = ObsidianDark)) {
                     Text("Got It", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
+    // Logout Confirmation Dialog
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            containerColor = SurfaceDark,
+            icon = {
+                Surface(
+                    shape = CircleShape,
+                    color = CrimsonRed.copy(alpha = 0.15f),
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Logout,
+                            contentDescription = "Logout",
+                            tint = CrimsonRed,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+            },
+            title = {
+                Text(
+                    text = "Sign Out of BarberCraft?",
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Are you sure you want to sign out?",
+                        color = TextPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Signed in as ${user.name} (${user.email}). All your bookings, favorites, and queue positions remain securely synced with the server.",
+                        color = TextSecondary,
+                        fontSize = 13.sp
+                    )
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { showLogoutDialog = false },
+                    border = BorderStroke(1.dp, BorderSubtle),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
+                ) {
+                    Text("Cancel")
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showLogoutDialog = false
+                        viewModel.logout()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = CrimsonRed,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text("Log Out", fontWeight = FontWeight.Bold)
                 }
             }
         )

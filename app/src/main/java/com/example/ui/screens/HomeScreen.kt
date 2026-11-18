@@ -50,6 +50,11 @@ fun HomeScreen(
     val isSyncing by viewModel.isSyncing.collectAsState()
     var searchInput by remember { mutableStateOf("") }
 
+    // Always fetch live shops from API upon opening Home Screen
+    LaunchedEffect(Unit) {
+        viewModel.refreshShops()
+    }
+
     val categories = listOf("Haircut", "Beard", "Hair Color", "Facial", "Hair Spa", "Kids Haircut")
 
     LazyColumn(
@@ -72,13 +77,22 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column {
+                        val welcomeName = remember(user?.name) {
+                            val clean = (user?.name ?: "").trim()
+                            if (clean.isBlank() || clean.equals("Guest User", ignoreCase = true)) {
+                                "Customer"
+                            } else {
+                                clean.split("\\s+".toRegex()).firstOrNull()?.takeIf { it.isNotBlank() } ?: clean
+                            }
+                        }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "Good Morning, ${user.name.split(" ").first()} 👋",
+                                text = "Welcome, $welcomeName 👋",
                                 style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
-                                )
+                                ),
+                                modifier = Modifier.testTag("home_welcome_text")
                             )
                         }
                         Spacer(modifier = Modifier.height(6.dp))
@@ -129,7 +143,7 @@ fun HomeScreen(
                             modifier = Modifier.size(46.dp)
                         ) {
                             Image(
-                                painter = painterResource(id = R.drawable.img_avatar_akash),
+                                painter = painterResource(id = R.drawable.img_profile_avatar),
                                 contentDescription = "Profile",
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize()

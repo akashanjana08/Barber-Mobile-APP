@@ -2,9 +2,11 @@ package com.example.ui.components
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -25,6 +27,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.*
+import com.example.data.util.BookingDateUtils
+import com.example.ui.BarberViewModel
 import com.example.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -443,7 +447,7 @@ fun CancelBookingDialog(
         text = {
             Column {
                 Text(
-                    text = "Are you sure you want to cancel your appointment with ${booking.barberName} at ${booking.shopName}?",
+                    text = "Are you sure you want to cancel your appointment on ${BookingDateUtils.formatUserFriendlyDateTime(booking.dateStr, booking.timeSlot)} with ${booking.barberName} at ${booking.shopName}?",
                     color = TextSecondary,
                     fontSize = 14.sp
                 )
@@ -493,17 +497,84 @@ fun CancelBookingDialog(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun RescheduleDialog(
     booking: Booking,
-    onConfirmReschedule: (newDate: String, newTime: String) -> Unit,
+    viewModel: BarberViewModel? = null,
+    onConfirmReschedule: (newDateStr: String, newTimeSlot: String, newBarberName: String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val dates = listOf("26 Sep 2026", "27 Sep 2026", "28 Sep 2026", "29 Sep 2026")
-    val times = listOf("11:00 AM", "01:30 PM", "04:00 PM", "06:00 PM", "07:30 PM")
+    val context = LocalContext.current
+    val availableDateItems = remember { BookingDateUtils.getAvailableBookingDates() }
+    val availableBarbers = remember(booking) {
+        listOf(
+            booking.barberName,
+            "Rahul Sharma",
+            "Vikram Singh",
+            "Amit Patel"
+        ).filter { it.isNotBlank() }.distinct()
+    }
 
-    var selectedDate by remember { mutableStateOf(dates.first()) }
-    var selectedTime by remember { mutableStateOf(times.first()) }
+    var selectedDate by remember { mutableStateOf(availableDateItems.first().fullDateStr) }
+    var selectedTime by remember { mutableStateOf(booking.timeSlot.ifBlank { "10:00 AM" }) }
+    var selectedBarber by remember { mutableStateOf(booking.barberName.ifBlank { availableBarbers.first() }) }
+    var slotIntervalMinutes by remember { mutableIntStateOf(30) }
+
+    var isLoadingSlots by remember { mutableStateOf(false) }
+    var apiSlotsMap by remember { mutableStateOf<Map<String, List<Pair<String, Boolean>>>>(emptyMap()) }
+
+    // Fetch availability from API whenever date, barber, or slotIntervalMinutes changes
+    LaunchedEffect(selectedDate, selectedBarber, slotIntervalMinutes) {
+        isLoadingSlots = true
+        val targetShopId = booking.shopId.ifBlank { "shop_9606dbb5-74a5-4634-8eef-d2375ffb6ab9" }
+        val targetBarberId = booking.barberId ?: "b1"
+        val targetServiceIds = booking.serviceIds.ifEmpty { listOf("s1") }
+
+        if (viewModel != null) {
+            val fetched = viewModel.getRescheduleAvailabilitySlots(
+                shopId = targetShopId,
+                barberId = targetBarberId,
+                date = selectedDate,
+                serviceIds = targetServiceIds,
+                slotIntervalMinutes = slotIntervalMinutes
+            )
+            apiSlotsMap = fetched
+        } else {
+            // Authoritative fallback matching API logic if viewModel not passed
+            val morning = mutableListOf<Pair<String, Boolean>>()
+            val afternoon = mutableListOf<Pair<String, Boolean>>()
+            val evening = mutableListOf<Pair<String, Boolean>>()
+            var currentMin = 8 * 60
+            val endLimit = 22 * 60
+            val isToday = BookingDateUtils.isToday(selectedDate)
+            while (currentMin < endLimit) {
+                val h = currentMin / 60
+                val m = currentMin % 60
+                val timeStr = String.format(java.util.Locale.ENGLISH, "%02d:%02d", h, m)
+                val available = when {
+                    currentMin >= 21 * 60 -> true
+                    currentMin == 20 * 60 + 30 -> false
+                    currentMin in (10 * 60)..(16 * 60) && (currentMin % 60 == 0) -> true
+                    isToday && currentMin < 12 * 60 -> false
+                    else -> currentMin % 90 == 0
+                }
+                val pair = timeStr to available
+                when {
+                    h < 12 -> morning.add(pair)
+                    h in 12..15 -> afternoon.add(pair)
+                    else -> evening.add(pair)
+                }
+                currentMin += slotIntervalMinutes
+            }
+            val map = mutableMapOf<String, List<Pair<String, Boolean>>>()
+            if (morning.isNotEmpty()) map["Morning"] = morning
+            if (afternoon.isNotEmpty()) map["Afternoon"] = afternoon
+            if (evening.isNotEmpty()) map["Evening"] = evening
+            apiSlotsMap = map
+        }
+        isLoadingSlots = false
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -512,27 +583,281 @@ fun RescheduleDialog(
             Text("Reschedule Appointment", color = TextPrimary, fontWeight = FontWeight.Bold)
         },
         text = {
-            Column {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
                 Text(
-                    "Current slot: ${booking.timeSlot} on ${booking.dateStr}",
+                    "Current: ${BookingDateUtils.formatUserFriendlyDateTime(booking.dateStr, booking.timeSlot)} with ${booking.barberName}",
                     color = TextSecondary,
+                    fontSize = 12.sp
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Section 1: Dynamic 3-Day Date Selection with Current Date highlight (like Schedule Screen)
+                Text(
+                    "Select Date",
+                    color = AmberGold,
+                    fontWeight = FontWeight.Bold,
                     fontSize = 13.sp
                 )
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text("Select New Date", color = AmberGold, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    dates.take(3).forEach { d ->
-                        val isSelected = selectedDate == d
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    availableDateItems.forEach { dateItem ->
+                        val isSelected = selectedDate == dateItem.fullDateStr || selectedDate == dateItem.shortDateStr
+                        val isCurrentDate = dateItem.relativeLabel.equals("Today", ignoreCase = true) || BookingDateUtils.isToday(dateItem.fullDateStr)
                         Surface(
-                            onClick = { selectedDate = d },
+                            onClick = { selectedDate = dateItem.fullDateStr },
+                            shape = RoundedCornerShape(12.dp),
+                            color = when {
+                                isSelected -> AmberGold
+                                isCurrentDate -> AmberGold.copy(alpha = 0.16f)
+                                else -> SurfaceCard
+                            },
+                            border = BorderStroke(
+                                if (isCurrentDate || isSelected) 2.dp else 1.dp,
+                                when {
+                                    isSelected -> AmberGoldLight
+                                    isCurrentDate -> AmberGold
+                                    else -> BorderSubtle
+                                }
+                            ),
+                            modifier = Modifier
+                                .width(108.dp)
+                                .testTag("reschedule_date_${dateItem.dayNumber}")
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp)
+                            ) {
+                                if (isCurrentDate) {
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = if (isSelected) ObsidianDark else AmberGold,
+                                        modifier = Modifier.padding(bottom = 3.dp)
+                                    ) {
+                                        Text(
+                                            text = "CURRENT DATE",
+                                            color = if (isSelected) AmberGold else ObsidianDark,
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 7.5.sp,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = "${dateItem.dayNumber} ${dateItem.shortMonthName}",
+                                    color = if (isSelected) ObsidianDark else TextPrimary,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 13.sp
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = if (isCurrentDate) "Today" else dateItem.relativeLabel,
+                                    color = if (isSelected) ObsidianDark.copy(alpha = 0.85f) else if (isCurrentDate) AmberGold else TextSecondary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Slot Interval Selector (default 30m)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("reschedule_slot_interval_selector")
+                ) {
+                    Text("Slot Interval:", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    listOf(15, 30, 45, 60).forEach { interval ->
+                        val isSelectedInterval = slotIntervalMinutes == interval
+                        Surface(
+                            onClick = { slotIntervalMinutes = interval },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelectedInterval) AmberGold else SurfaceCard,
+                            border = BorderStroke(1.dp, if (isSelectedInterval) AmberGold else BorderSubtle),
+                            modifier = Modifier.testTag("reschedule_interval_${interval}m")
+                        ) {
+                            Text(
+                                text = "${interval}m",
+                                color = if (isSelectedInterval) ObsidianDark else TextPrimary,
+                                fontWeight = if (isSelectedInterval) FontWeight.Bold else FontWeight.Medium,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Date Availability Pill indicator (Like Schedule Screen)
+                val isViewingCurrentDate = BookingDateUtils.isToday(selectedDate)
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isViewingCurrentDate) AmberGold.copy(alpha = 0.14f) else SurfaceCard,
+                    border = BorderStroke(1.dp, if (isViewingCurrentDate) AmberGold.copy(alpha = 0.6f) else BorderSubtle),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .background(if (isViewingCurrentDate) AmberGold else TextSecondary, CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Availability: ${BookingDateUtils.formatUserFriendlyDate(selectedDate)}",
+                                color = TextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp
+                            )
+                        }
+                        if (isViewingCurrentDate) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = AmberGold
+                            ) {
+                                Text(
+                                    text = "TODAY",
+                                    color = ObsidianDark,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 8.5.sp,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // API Slot list grouped by Morning/Afternoon/Evening like Schedule Screen
+                Text(
+                    "Select Time Slot",
+                    color = AmberGold,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                if (isLoadingSlots) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.fillMaxWidth().padding(24.dp)
+                    ) {
+                        CircularProgressIndicator(color = AmberGold, modifier = Modifier.size(28.dp))
+                    }
+                } else if (apiSlotsMap.isEmpty()) {
+                    Text(
+                        "No time slots available from API for selected parameters.",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+                } else {
+                    apiSlotsMap.forEach { (timeOfDay, slots) ->
+                        Text(
+                            text = "$timeOfDay Slots",
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                        )
+
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                        ) {
+                            slots.forEach { (slotTime, isAvailable) ->
+                                val friendlyTime = BookingDateUtils.formatUserFriendlyTime(slotTime)
+                                val isSelected = selectedTime == slotTime || selectedTime == friendlyTime
+                                Surface(
+                                    onClick = {
+                                        if (isAvailable) {
+                                            selectedTime = friendlyTime
+                                        } else {
+                                            Toast.makeText(context, "Slot is unavailable. Please pick an open time.", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = when {
+                                        !isAvailable -> SurfaceDark.copy(alpha = 0.5f)
+                                        isSelected -> AmberGold
+                                        else -> SurfaceCard
+                                    },
+                                    border = BorderStroke(
+                                        1.dp,
+                                        when {
+                                            !isAvailable -> BorderSubtle.copy(alpha = 0.4f)
+                                            isSelected -> AmberGoldLight
+                                            else -> BorderSubtle
+                                        }
+                                    ),
+                                    modifier = Modifier.width(90.dp).testTag("reschedule_slot_${slotTime.replace(":", "_").replace(" ", "_")}")
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier.padding(vertical = 6.dp)
+                                    ) {
+                                        Text(
+                                            text = friendlyTime,
+                                            color = when {
+                                                !isAvailable -> TextTertiary
+                                                isSelected -> ObsidianDark
+                                                else -> TextPrimary
+                                            },
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            fontSize = 11.sp
+                                        )
+                                        Text(
+                                            text = if (isAvailable) "Available" else "Unavailable",
+                                            color = when {
+                                                !isAvailable -> CrimsonRed.copy(alpha = 0.7f)
+                                                isSelected -> ObsidianDark
+                                                else -> EmeraldGreen
+                                            },
+                                            fontSize = 8.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Barber selection
+                Text("Select Master Barber", color = AmberGold, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                    availableBarbers.take(3).forEach { barber ->
+                        val isSelected = selectedBarber == barber
+                        Surface(
+                            onClick = { selectedBarber = barber },
                             shape = RoundedCornerShape(8.dp),
                             color = if (isSelected) AmberGold else SurfaceElevated,
                             modifier = Modifier.weight(1f)
                         ) {
                             Text(
-                                text = d.take(6),
+                                text = barber.split(" ").first(),
                                 color = if (isSelected) ObsidianDark else TextPrimary,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
@@ -542,40 +867,11 @@ fun RescheduleDialog(
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text("Select Available Time", color = AmberGold, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                Spacer(modifier = Modifier.height(8.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    times.chunked(3).forEach { rowTimes ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            rowTimes.forEach { t ->
-                                val isSelected = selectedTime == t
-                                Surface(
-                                    onClick = { selectedTime = t },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (isSelected) AmberGold else SurfaceElevated,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(
-                                        text = t,
-                                        color = if (isSelected) ObsidianDark else TextPrimary,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(vertical = 8.dp),
-                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
             }
         },
         confirmButton = {
             Button(
-                onClick = { onConfirmReschedule(selectedDate, selectedTime) },
+                onClick = { onConfirmReschedule(selectedDate, selectedTime, selectedBarber) },
                 colors = ButtonDefaults.buttonColors(containerColor = AmberGold, contentColor = ObsidianDark),
                 shape = RoundedCornerShape(10.dp)
             ) {
@@ -759,3 +1055,139 @@ fun DirectionsDialog(
         }
     )
 }
+
+@Composable
+fun BookingDetailDialog(
+    booking: Booking,
+    onDismiss: () -> Unit,
+    onReschedule: (() -> Unit)? = null,
+    onCancel: (() -> Unit)? = null
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SurfaceDark,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Appointment Details",
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (booking.bookingMode.contains("QUICK", ignoreCase = true)) EmeraldGreenBg else AmberGlow
+                ) {
+                    Text(
+                        text = if (booking.bookingMode.contains("QUICK", ignoreCase = true)) "⚡ Quick Queue" else "📅 Scheduled",
+                        color = if (booking.bookingMode.contains("QUICK", ignoreCase = true)) EmeraldGreen else AmberGold,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = SurfaceElevated,
+                    border = BorderStroke(1.dp, BorderSubtle),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Booking Reference", color = TextSecondary, fontSize = 12.sp)
+                            Text(booking.id, fontWeight = FontWeight.Bold, color = AmberGold, fontSize = 13.sp)
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Salon", color = TextSecondary, fontSize = 12.sp)
+                            Text(booking.shopName, fontWeight = FontWeight.SemiBold, color = TextPrimary, fontSize = 13.sp)
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Stylist", color = TextSecondary, fontSize = 12.sp)
+                            Text(booking.barberName, fontWeight = FontWeight.SemiBold, color = TextPrimary, fontSize = 13.sp)
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Date & Time", color = TextSecondary, fontSize = 12.sp)
+                            Text(BookingDateUtils.formatUserFriendlyDateTime(booking.dateStr, booking.timeSlot), fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 13.sp)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text("Services Booked:", color = TextSecondary, fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                booking.serviceNames.forEach { serviceName ->
+                    Text("• $serviceName", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = BorderSubtle)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Payment Status", color = TextSecondary, fontSize = 13.sp)
+                    Text("${booking.paymentStatus.name} (${booking.paymentMethod})", color = EmeraldGreen, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Total Price", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 14.sp)
+                    Text("₹${booking.total}", fontWeight = FontWeight.ExtraBold, color = AmberGold, fontSize = 16.sp)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = AmberGold, contentColor = ObsidianDark),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text("Done", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            if (booking.status == BookingStatus.UPCOMING && onCancel != null) {
+                OutlinedButton(
+                    onClick = onCancel,
+                    border = BorderStroke(1.dp, CrimsonRed.copy(alpha = 0.7f)),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Cancel Booking", color = CrimsonRed, fontSize = 12.sp)
+                }
+            }
+        }
+    )
+}
+

@@ -36,6 +36,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        com.example.data.local.SessionManager.init(applicationContext)
+        com.example.data.network.NetworkConfig.init(applicationContext)
+
         val db = AppDatabase.getDatabase(applicationContext)
         val repository = BarberRepository(database = db)
 
@@ -301,11 +304,18 @@ fun MainAppShell(viewModel: BarberViewModel) {
         rescheduleTarget?.let { booking ->
             RescheduleDialog(
                 booking = booking,
-                onConfirmReschedule = { newDate, newTime ->
-                    viewModel.rescheduleNewDate.value = newDate
-                    viewModel.rescheduleNewTime.value = newTime
-                    viewModel.rescheduleActiveBooking(booking.id)
-                    Toast.makeText(context, "Appointment rescheduled to $newDate at $newTime.", Toast.LENGTH_LONG).show()
+                viewModel = viewModel,
+                onConfirmReschedule = { newDateStr, newTimeSlot, newBarberName ->
+                    viewModel.rescheduleNewDate.value = newDateStr
+                    viewModel.rescheduleNewTime.value = newTimeSlot
+                    viewModel.rescheduleNewBarber.value = newBarberName
+                    viewModel.rescheduleActiveBooking(
+                        bookingId = booking.id,
+                        newDateStr = newDateStr,
+                        newTimeSlot = newTimeSlot,
+                        newBarberName = newBarberName
+                    )
+                    Toast.makeText(context, "Appointment rescheduled to $newDateStr at $newTimeSlot with $newBarberName.", Toast.LENGTH_LONG).show()
                 },
                 onDismiss = { viewModel.rescheduleModalBooking.value = null }
             )

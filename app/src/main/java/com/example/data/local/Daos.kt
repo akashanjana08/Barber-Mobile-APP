@@ -11,6 +11,12 @@ interface BookingDao {
     @Query("SELECT * FROM bookings ORDER BY createdAt DESC")
     fun getAllBookings(): Flow<List<BookingEntity>>
 
+    @Query("SELECT * FROM bookings ORDER BY createdAt DESC")
+    suspend fun getAllBookingsList(): List<BookingEntity>
+
+    @Query("DELETE FROM bookings")
+    suspend fun clearAllBookings()
+
     @Query("SELECT * FROM bookings WHERE id = :id LIMIT 1")
     suspend fun getBookingById(id: String): BookingEntity?
 
@@ -26,8 +32,8 @@ interface BookingDao {
     @Query("UPDATE bookings SET reminderSentAt = :sentAt WHERE id = :id")
     suspend fun updateReminderSentAt(id: String, sentAt: Long)
 
-    @Query("UPDATE bookings SET dateStr = :newDate, timeSlot = :newTime, status = 'UPCOMING' WHERE id = :id")
-    suspend fun rescheduleBooking(id: String, newDate: String, newTime: String)
+    @Query("UPDATE bookings SET dateStr = :newDate, timeSlot = :newTime, barberName = CASE WHEN :newBarber IS NOT NULL AND :newBarber != '' THEN :newBarber ELSE barberName END, status = 'UPCOMING' WHERE id = :id")
+    suspend fun rescheduleBooking(id: String, newDate: String, newTime: String, newBarber: String? = null)
 
     @Query("DELETE FROM bookings WHERE id = :id")
     suspend fun deleteBooking(id: String)
@@ -67,6 +73,9 @@ interface UserProfileDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveUserProfile(profile: UserProfileEntity)
+
+    @Query("DELETE FROM user_profile")
+    suspend fun clearUserProfile()
 }
 
 @Dao
@@ -136,6 +145,9 @@ interface BarberQueueDao {
 
     @Query("UPDATE barber_queue SET scheduledTime = :newTime, scheduledTimeMinutes = :newMinutes, lastUpdated = :now WHERE id = :id")
     suspend fun updateScheduledTime(id: String, newTime: String, newMinutes: Int, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE barber_queue SET barberName = :newBarberName, lastUpdated = :now WHERE id = :id")
+    suspend fun updateBarberName(id: String, newBarberName: String, now: Long = System.currentTimeMillis())
 
     @Query("UPDATE barber_queue SET delayMinutes = delayMinutes + :delayMins, remainingMinutes = remainingMinutes + :delayMins, lastUpdated = :now WHERE barberName = :barberName AND status IN ('CONFIRMED', 'CHECKED_IN', 'IN_PROGRESS', 'DELAYED')")
     suspend fun addBarberDelay(barberName: String, delayMins: Int, now: Long = System.currentTimeMillis())

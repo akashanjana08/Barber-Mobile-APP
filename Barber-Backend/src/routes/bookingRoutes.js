@@ -3,6 +3,8 @@ const router = express.Router();
 const bookingController = require('../controllers/bookingController');
 const { optionalAuth, protect } = require('../middleware/authMiddleware');
 
+router.post('/quick-queue/preview', optionalAuth, bookingController.previewQuickQueue);
+router.post('/quick-queue/confirm', optionalAuth, bookingController.confirmQuickQueue);
 router.post('/hold', optionalAuth, bookingController.holdSlot);
 router.post('/', optionalAuth, bookingController.createBooking);
 router.get('/', optionalAuth, bookingController.getUserBookings);

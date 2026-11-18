@@ -711,13 +711,13 @@ fun ShopDetailScreen(
                         .testTag("proceed_booking_button")
                 ) {
                     Text(
-                        text = "Select Time Slot",
+                        text = "Book Appointment",
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Icon(
-                        imageVector = Icons.Default.CalendarMonth,
+                        imageVector = Icons.Default.Bolt,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp)
                     )
